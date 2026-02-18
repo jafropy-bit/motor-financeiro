@@ -5,10 +5,10 @@ from datetime import datetime
 st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
 st.title("🚀 Motor Financeiro Empresarial")
-st.markdown("Sistema de análise financeira, diagnóstico e valuation por empresa.")
+st.markdown("Sistema de análise financeira, DRE completo e valuation por empresa.")
 
 # -------------------------------
-# CONEXÃO COM BANCO DE DADOS
+# CONEXÃO COM BANCO
 # -------------------------------
 
 conn = sqlite3.connect("empresas.db", check_same_thread=False)
@@ -33,8 +33,13 @@ CREATE TABLE IF NOT EXISTS dados_financeiros (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empresa_id INTEGER,
     receita_bruta REAL,
+    deducoes REAL,
     custos REAL,
-    despesas REAL,
+    despesas_adm REAL,
+    despesas_comerciais REAL,
+    depreciacao REAL,
+    resultado_financeiro REAL,
+    impostos REAL,
     data_registro TEXT,
     FOREIGN KEY (empresa_id) REFERENCES empresas (id)
 )
@@ -68,9 +73,9 @@ with st.form("form_empresa"):
         ]
     )
 
-    submitted = st.form_submit_button("Salvar Empresa")
+    submitted_empresa = st.form_submit_button("Salvar Empresa")
 
-    if submitted:
+    if submitted_empresa:
         cursor.execute(
             "INSERT INTO empresas (nome, cnpj, data_fundacao, area_atuacao) VALUES (?, ?, ?, ?)",
             (nome, cnpj, str(data_fundacao), area_atuacao)
@@ -81,7 +86,7 @@ with st.form("form_empresa"):
 st.markdown("---")
 
 # -------------------------------
-# SELEÇÃO DE EMPRESA
+# SELECIONAR EMPRESA
 # -------------------------------
 
 st.subheader("📋 Selecionar Empresa")
@@ -105,47 +110,58 @@ empresa_id = empresa_dict[empresa_selecionada]
 st.markdown("---")
 
 # -------------------------------
-# INSERIR DADOS FINANCEIROS
+# FORMULÁRIO DRE COMPLETO
 # -------------------------------
 
-st.subheader("📊 Inserir Dados Financeiros")
+st.subheader("📊 Inserir DRE")
 
-with st.form("form_financeiro"):
+with st.form("form_dre"):
+
     receita_bruta = st.number_input("Receita Bruta", min_value=0.0)
-    custos = st.number_input("Custos", min_value=0.0)
-    despesas = st.number_input("Despesas", min_value=0.0)
+    deducoes = st.number_input("Deduções / Impostos sobre Receita", min_value=0.0)
+    custos = st.number_input("Custos (CMV/CPV/CSP)", min_value=0.0)
+    despesas_adm = st.number_input("Despesas Administrativas", min_value=0.0)
+    despesas_comerciais = st.number_input("Despesas Comerciais", min_value=0.0)
+    depreciacao = st.number_input("Depreciação / Amortização", min_value=0.0)
+    resultado_financeiro = st.number_input("Resultado Financeiro", min_value=0.0)
+    impostos = st.number_input("Impostos sobre Lucro", min_value=0.0)
 
-    submitted_fin = st.form_submit_button("Salvar Dados Financeiros")
+    submitted_dre = st.form_submit_button("Salvar DRE")
 
-    if submitted_fin:
-        cursor.execute(
-            """
-            INSERT INTO dados_financeiros 
-            (empresa_id, receita_bruta, custos, despesas, data_registro) 
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                empresa_id,
-                receita_bruta,
-                custos,
-                despesas,
-                str(datetime.now())
-            )
-        )
+    if submitted_dre:
+        cursor.execute("""
+        INSERT INTO dados_financeiros 
+        (empresa_id, receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais,
+         depreciacao, resultado_financeiro, impostos, data_registro)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            empresa_id,
+            receita_bruta,
+            deducoes,
+            custos,
+            despesas_adm,
+            despesas_comerciais,
+            depreciacao,
+            resultado_financeiro,
+            impostos,
+            str(datetime.now())
+        ))
         conn.commit()
-        st.success("Dados financeiros salvos com sucesso!")
+        st.success("DRE salvo com sucesso!")
 
 st.markdown("---")
 
 # -------------------------------
-# EXIBIR ÚLTIMO REGISTRO FINANCEIRO
+# BUSCAR ÚLTIMO DRE
 # -------------------------------
 
 cursor.execute("""
-SELECT receita_bruta, custos, despesas 
-FROM dados_financeiros 
-WHERE empresa_id = ? 
-ORDER BY id DESC 
+SELECT receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais,
+       depreciacao, resultado_financeiro, impostos
+FROM dados_financeiros
+WHERE empresa_id = ?
+ORDER BY id DESC
 LIMIT 1
 """, (empresa_id,))
 
@@ -153,29 +169,53 @@ dados = cursor.fetchone()
 
 if dados:
 
-    receita_bruta, custos, despesas = dados
+    receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais, depreciacao, resultado_financeiro, impostos = dados
 
-    receita_liquida = receita_bruta
+    # -------------------------------
+    # CÁLCULO DO DRE
+    # -------------------------------
+
+    receita_liquida = receita_bruta - deducoes
     lucro_bruto = receita_liquida - custos
-    ebitda = lucro_bruto - despesas
 
-    margem_ebitda = (ebitda / receita_liquida) * 100 if receita_liquida > 0 else 0
-    margem_contribuicao = (lucro_bruto / receita_liquida) * 100 if receita_liquida > 0 else 0
-    ponto_equilibrio = despesas / (margem_contribuicao / 100) if margem_contribuicao > 0 else 0
+    despesas_operacionais = despesas_adm + despesas_comerciais
+    ebitda = lucro_bruto - despesas_operacionais
 
-    st.subheader("📈 Resultados Financeiros")
+    ebit = ebitda - depreciacao
+    lucro_antes_ir = ebit + resultado_financeiro
+    lucro_liquido = lucro_antes_ir - impostos
 
-    col1, col2, col3 = st.columns(3)
+    # -------------------------------
+    # EXIBIÇÃO DO DRE
+    # -------------------------------
 
-    col1.metric("Receita Líquida", f"R$ {receita_liquida:,.2f}")
-    col2.metric("Lucro Bruto", f"R$ {lucro_bruto:,.2f}")
-    col3.metric("EBITDA", f"R$ {ebitda:,.2f}")
+    st.subheader("📑 Demonstração do Resultado (DRE)")
 
-    st.metric("Margem EBITDA (%)", f"{margem_ebitda:.2f}%")
-    st.metric("Margem de Contribuição (%)", f"{margem_contribuicao:.2f}%")
-    st.metric("Ponto de Equilíbrio", f"R$ {ponto_equilibrio:,.2f}")
+    st.write(f"Receita Bruta: R$ {receita_bruta:,.2f}")
+    st.write(f"(-) Deduções: R$ {deducoes:,.2f}")
+    st.write(f"= Receita Líquida: R$ {receita_liquida:,.2f}")
 
-    # Valuation simples
+    st.write(f"(-) Custos: R$ {custos:,.2f}")
+    st.write(f"= Lucro Bruto: R$ {lucro_bruto:,.2f}")
+
+    st.write(f"(-) Despesas Operacionais: R$ {despesas_operacionais:,.2f}")
+    st.write(f"= EBITDA: R$ {ebitda:,.2f}")
+
+    st.write(f"(-) Depreciação: R$ {depreciacao:,.2f}")
+    st.write(f"= EBIT: R$ {ebit:,.2f}")
+
+    st.write(f"(+) Resultado Financeiro: R$ {resultado_financeiro:,.2f}")
+    st.write(f"= Lucro Antes do IR: R$ {lucro_antes_ir:,.2f}")
+
+    st.write(f"(-) Impostos: R$ {impostos:,.2f}")
+    st.write(f"= Lucro Líquido: R$ {lucro_liquido:,.2f}")
+
+    st.markdown("---")
+
+    # -------------------------------
+    # VALUATION
+    # -------------------------------
+
     st.subheader("💰 Valuation Estimado")
 
     st.write(f"Valuation Conservador (3x EBITDA): R$ {ebitda * 3:,.2f}")
@@ -183,5 +223,4 @@ if dados:
     st.write(f"Valuation Agressivo (8x EBITDA): R$ {ebitda * 8:,.2f}")
 
 else:
-    st.info("Ainda não há dados financeiros cadastrados para esta empresa.")
-
+    st.info("Ainda não há DRE cadastrado para esta empresa.")

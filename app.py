@@ -1,210 +1,224 @@
 import streamlit as st
 import sqlite3
+import bcrypt
 from datetime import datetime
 
-st.set_page_config(page_title="Motor Financeiro", layout="wide")
+st.set_page_config(page_title="SaaS Financeiro", layout="wide")
 
-st.title("🚀 Motor Financeiro Empresarial")
-st.markdown("Sistema de análise financeira, DRE completo e valuation por empresa.")
-
-# -------------------------------
+# =========================
 # CONEXÃO COM BANCO
-# -------------------------------
+# =========================
 
-conn = sqlite3.connect("empresas.db", check_same_thread=False)
+conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# 🔥 APAGA TABELAS ANTIGAS (FASE DE DESENVOLVIMENTO)
-cursor.execute("DROP TABLE IF EXISTS dados_financeiros")
-cursor.execute("DROP TABLE IF EXISTS empresas")
-conn.commit()
-
-# -------------------------------
-# CRIAÇÃO DAS TABELAS ATUALIZADAS
-# -------------------------------
+# =========================
+# CRIAÇÃO DAS TABELAS
+# =========================
 
 cursor.execute("""
-CREATE TABLE empresas (
+CREATE TABLE IF NOT EXISTS empresas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT,
     cnpj TEXT,
-    data_fundacao TEXT,
-    area_atuacao TEXT
+    pais_origem TEXT,
+    pais_atuacao TEXT
 )
 """)
 
 cursor.execute("""
-CREATE TABLE dados_financeiros (
+CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empresa_id INTEGER,
-    receita_bruta REAL,
-    deducoes REAL,
-    custos REAL,
-    despesas_adm REAL,
-    despesas_comerciais REAL,
-    depreciacao REAL,
-    resultado_financeiro REAL,
+    nome TEXT,
+    email TEXT UNIQUE,
+    senha BLOB,
+    tipo TEXT,
+    aceitou_politica INTEGER,
+    data_aceite TEXT,
+    FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS dados_financeiros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empresa_id INTEGER,
+    receita REAL,
     impostos REAL,
-    data_registro TEXT,
-    FOREIGN KEY (empresa_id) REFERENCES empresas (id)
+    despesas REAL,
+    data_lancamento TEXT,
+    FOREIGN KEY (empresa_id) REFERENCES empresas(id)
 )
 """)
 
 conn.commit()
 
-# -------------------------------
-# CADASTRO DE EMPRESA
-# -------------------------------
+# =========================
+# SESSION STATE
+# =========================
 
-st.subheader("🏢 Cadastro de Empresa")
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+    st.session_state.usuario_id = None
+    st.session_state.empresa_id = None
+    st.session_state.tipo = None
 
-with st.form("form_empresa"):
+# =========================
+# FUNÇÃO HASH SENHA
+# =========================
+
+def gerar_hash(senha):
+    return bcrypt.hashpw(senha.encode(), bcrypt.gensalt())
+
+def verificar_senha(senha_digitada, senha_hash):
+    return bcrypt.checkpw(senha_digitada.encode(), senha_hash)
+
+# =========================
+# TELA LOGIN
+# =========================
+
+def tela_login():
+    st.title("Login")
+
+    email = st.text_input("Email")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        cursor.execute("SELECT * FROM usuarios WHERE email=?", (email,))
+        usuario = cursor.fetchone()
+
+        if usuario and verificar_senha(senha, usuario[4]):
+            st.session_state.logado = True
+            st.session_state.usuario_id = usuario[0]
+            st.session_state.empresa_id = usuario[1]
+            st.session_state.tipo = usuario[5]
+            st.success("Login realizado com sucesso!")
+            st.rerun()
+        else:
+            st.error("Credenciais inválidas")
+
+# =========================
+# CADASTRO EMPRESA
+# =========================
+
+def tela_cadastro():
+    st.title("Cadastro de Empresa")
+
     nome = st.text_input("Nome da Empresa")
     cnpj = st.text_input("CNPJ")
-    data_fundacao = st.date_input("Data de Fundação")
-    area_atuacao = st.selectbox(
-        "Área de Atuação",
-        [
-            "Indústria",
-            "Comércio",
-            "Serviços",
-            "Tecnologia",
-            "Saúde",
-            "Educação",
-            "Construção",
-            "Agronegócio",
-            "Financeiro",
-            "Outro"
-        ]
+    pais_origem = st.text_input("País de Origem")
+
+    pais_atuacao = st.selectbox(
+        "País de Atuação",
+        ["Brasil", "Estados Unidos", "Portugal", "Canadá"]
     )
 
-    submitted_empresa = st.form_submit_button("Salvar Empresa")
+    st.markdown("### Criar Usuário Administrador")
 
-    if submitted_empresa:
-        cursor.execute(
-            "INSERT INTO empresas (nome, cnpj, data_fundacao, area_atuacao) VALUES (?, ?, ?, ?)",
-            (nome, cnpj, str(data_fundacao), area_atuacao)
-        )
+    nome_user = st.text_input("Nome do Admin")
+    email = st.text_input("Email")
+    senha = st.text_input("Senha", type="password")
+
+    aceite = st.checkbox("Li e concordo com a Política de Privacidade")
+
+    if st.button("Cadastrar"):
+        if not aceite:
+            st.error("Você precisa aceitar a Política de Privacidade.")
+            return
+
+        senha_hash = gerar_hash(senha)
+
+        cursor.execute("""
+        INSERT INTO empresas (nome, cnpj, pais_origem, pais_atuacao)
+        VALUES (?, ?, ?, ?)
+        """, (nome, cnpj, pais_origem, pais_atuacao))
+
+        empresa_id = cursor.lastrowid
+
+        cursor.execute("""
+        INSERT INTO usuarios 
+        (empresa_id, nome, email, senha, tipo, aceitou_politica, data_aceite)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            empresa_id,
+            nome_user,
+            email,
+            senha_hash,
+            "admin",
+            1,
+            datetime.now().isoformat()
+        ))
+
         conn.commit()
         st.success("Empresa cadastrada com sucesso!")
 
-st.markdown("---")
+# =========================
+# DASHBOARD
+# =========================
 
-# -------------------------------
-# SELECIONAR EMPRESA
-# -------------------------------
+def dashboard():
+    st.title("Dashboard Financeiro")
 
-st.subheader("📋 Selecionar Empresa")
+    if st.session_state.tipo not in ["admin", "usuario"]:
+        st.error("Acesso negado.")
+        st.stop()
 
-cursor.execute("SELECT id, nome FROM empresas")
-empresas = cursor.fetchall()
+    st.subheader("Inserir Dados Financeiros")
 
-if len(empresas) == 0:
-    st.warning("Cadastre uma empresa primeiro.")
-    st.stop()
+    receita = st.number_input("Receita")
+    impostos = st.number_input("Impostos")
+    despesas = st.number_input("Despesas")
 
-empresa_dict = {empresa[1]: empresa[0] for empresa in empresas}
-
-empresa_selecionada = st.selectbox(
-    "Escolha a empresa",
-    list(empresa_dict.keys())
-)
-
-empresa_id = empresa_dict[empresa_selecionada]
-
-st.markdown("---")
-
-# -------------------------------
-# FORMULÁRIO DRE COMPLETO
-# -------------------------------
-
-st.subheader("📊 Inserir DRE")
-
-with st.form("form_dre"):
-
-    receita_bruta = st.number_input("Receita Bruta", min_value=0.0)
-    deducoes = st.number_input("Deduções / Impostos sobre Receita", min_value=0.0)
-    custos = st.number_input("Custos (CMV/CPV/CSP)", min_value=0.0)
-    despesas_adm = st.number_input("Despesas Administrativas", min_value=0.0)
-    despesas_comerciais = st.number_input("Despesas Comerciais", min_value=0.0)
-    depreciacao = st.number_input("Depreciação / Amortização", min_value=0.0)
-    resultado_financeiro = st.number_input("Resultado Financeiro", min_value=0.0)
-    impostos = st.number_input("Impostos sobre Lucro", min_value=0.0)
-
-    submitted_dre = st.form_submit_button("Salvar DRE")
-
-    if submitted_dre:
+    if st.button("Salvar Dados"):
         cursor.execute("""
-        INSERT INTO dados_financeiros 
-        (empresa_id, receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais,
-         depreciacao, resultado_financeiro, impostos, data_registro)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            empresa_id,
-            receita_bruta,
-            deducoes,
-            custos,
-            despesas_adm,
-            despesas_comerciais,
-            depreciacao,
-            resultado_financeiro,
+        INSERT INTO dados_financeiros
+        (empresa_id, receita, impostos, despesas, data_lancamento)
+        VALUES (?, ?, ?, ?, ?)
+        """, (
+            st.session_state.empresa_id,
+            receita,
             impostos,
-            str(datetime.now())
+            despesas,
+            datetime.now().isoformat()
         ))
         conn.commit()
-        st.success("DRE salvo com sucesso!")
+        st.success("Dados salvos!")
 
-st.markdown("---")
+    st.subheader("DRE")
 
-# -------------------------------
-# BUSCAR ÚLTIMO DRE
-# -------------------------------
+    cursor.execute("""
+    SELECT receita, impostos, despesas 
+    FROM dados_financeiros 
+    WHERE empresa_id = ?
+    """, (st.session_state.empresa_id,))
 
-cursor.execute("""
-SELECT receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais,
-       depreciacao, resultado_financeiro, impostos
-FROM dados_financeiros
-WHERE empresa_id = ?
-ORDER BY id DESC
-LIMIT 1
-""", (empresa_id,))
+    dados = cursor.fetchall()
 
-dados = cursor.fetchone()
+    total_receita = sum([d[0] for d in dados])
+    total_impostos = sum([d[1] for d in dados])
+    total_despesas = sum([d[2] for d in dados])
+    lucro = total_receita - total_impostos - total_despesas
 
-if dados:
+    st.write("Receita Total:", total_receita)
+    st.write("Impostos:", total_impostos)
+    st.write("Despesas:", total_despesas)
+    st.write("Lucro Líquido:", lucro)
 
-    receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais, depreciacao, resultado_financeiro, impostos = dados
+    if st.button("Sair"):
+        st.session_state.clear()
+        st.rerun()
 
-    receita_liquida = receita_bruta - deducoes
-    lucro_bruto = receita_liquida - custos
-    despesas_operacionais = despesas_adm + despesas_comerciais
-    ebitda = lucro_bruto - despesas_operacionais
-    ebit = ebitda - depreciacao
-    lucro_antes_ir = ebit + resultado_financeiro
-    lucro_liquido = lucro_antes_ir - impostos
+# =========================
+# MENU PRINCIPAL
+# =========================
 
-    st.subheader("📑 Demonstração do Resultado (DRE)")
+menu = st.sidebar.selectbox("Menu", ["Login", "Cadastrar Empresa"])
 
-    st.write(f"Receita Bruta: R$ {receita_bruta:,.2f}")
-    st.write(f"(-) Deduções: R$ {deducoes:,.2f}")
-    st.write(f"= Receita Líquida: R$ {receita_liquida:,.2f}")
-    st.write(f"(-) Custos: R$ {custos:,.2f}")
-    st.write(f"= Lucro Bruto: R$ {lucro_bruto:,.2f}")
-    st.write(f"(-) Despesas Operacionais: R$ {despesas_operacionais:,.2f}")
-    st.write(f"= EBITDA: R$ {ebitda:,.2f}")
-    st.write(f"(-) Depreciação: R$ {depreciacao:,.2f}")
-    st.write(f"= EBIT: R$ {ebit:,.2f}")
-    st.write(f"(+) Resultado Financeiro: R$ {resultado_financeiro:,.2f}")
-    st.write(f"= Lucro Antes do IR: R$ {lucro_antes_ir:,.2f}")
-    st.write(f"(-) Impostos: R$ {impostos:,.2f}")
-    st.write(f"= Lucro Líquido: R$ {lucro_liquido:,.2f}")
-
-    st.markdown("---")
-    st.subheader("💰 Valuation Estimado")
-    st.write(f"3x EBITDA: R$ {ebitda * 3:,.2f}")
-    st.write(f"5x EBITDA: R$ {ebitda * 5:,.2f}")
-    st.write(f"8x EBITDA: R$ {ebitda * 8:,.2f}")
-
+if not st.session_state.logado:
+    if menu == "Login":
+        tela_login()
+    else:
+        tela_cadastro()
 else:
-    st.info("Ainda não há DRE cadastrado para esta empresa.")
+    dashboard()

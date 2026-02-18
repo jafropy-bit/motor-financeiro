@@ -1,89 +1,187 @@
 import streamlit as st
+import sqlite3
+from datetime import datetime
 
-st.set_page_config(page_title="Motor de Diagnóstico Financeiro", layout="centered")
+st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
-st.title("📊 Motor de Diagnóstico Financeiro")
+st.title("🚀 Motor Financeiro Empresarial")
+st.markdown("Sistema de análise financeira, diagnóstico e valuation por empresa.")
 
-st.header("Entrada de Dados")
+# -------------------------------
+# CONEXÃO COM BANCO DE DADOS
+# -------------------------------
 
-receita = st.number_input("Receita Bruta", min_value=0.0)
-impostos = st.number_input("Impostos", min_value=0.0)
-custos_variaveis = st.number_input("Custos Variáveis", min_value=0.0)
-custos_fixos = st.number_input("Custos Fixos", min_value=0.0)
-despesas = st.number_input("Despesas Operacionais", min_value=0.0)
-depreciacao = st.number_input("Depreciação", min_value=0.0)
-juros = st.number_input("Juros", min_value=0.0)
+conn = sqlite3.connect("empresas.db", check_same_thread=False)
+cursor = conn.cursor()
 
-if st.button("Analisar Empresa"):
+# -------------------------------
+# CRIAÇÃO DAS TABELAS
+# -------------------------------
 
-    # Cálculos principais
-    receita_liquida = receita - impostos
-    lucro_bruto = receita_liquida - custos_variaveis
-    ebitda = receita_liquida - custos_variaveis - custos_fixos - despesas
-    margem_ebitda = (ebitda / receita_liquida * 100) if receita_liquida > 0 else 0
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS empresas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT,
+    cnpj TEXT,
+    data_fundacao TEXT,
+    area_atuacao TEXT
+)
+""")
 
-    margem_contribuicao = receita - custos_variaveis
-    percentual_mc = (margem_contribuicao / receita * 100) if receita > 0 else 0
-    ponto_equilibrio = custos_fixos / (percentual_mc / 100) if percentual_mc > 0 else 0
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS dados_financeiros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empresa_id INTEGER,
+    receita_bruta REAL,
+    custos REAL,
+    despesas REAL,
+    data_registro TEXT,
+    FOREIGN KEY (empresa_id) REFERENCES empresas (id)
+)
+""")
 
-    # Valuation
-    valuation_3x = ebitda * 3
-    valuation_5x = ebitda * 5
-    valuation_8x = ebitda * 8
+conn.commit()
 
-    # Score Financeiro simples
-    score = 0
+# -------------------------------
+# CADASTRO DE EMPRESA
+# -------------------------------
 
-    if margem_ebitda >= 20:
-        score += 40
-    elif margem_ebitda >= 10:
-        score += 25
-    else:
-        score += 10
+st.subheader("🏢 Cadastro de Empresa")
 
-    if percentual_mc >= 40:
-        score += 30
-    elif percentual_mc >= 25:
-        score += 20
-    else:
-        score += 10
+with st.form("form_empresa"):
+    nome = st.text_input("Nome da Empresa")
+    cnpj = st.text_input("CNPJ")
+    data_fundacao = st.date_input("Data de Fundação")
+    area_atuacao = st.selectbox(
+        "Área de Atuação",
+        [
+            "Indústria",
+            "Comércio",
+            "Serviços",
+            "Tecnologia",
+            "Saúde",
+            "Educação",
+            "Construção",
+            "Agronegócio",
+            "Financeiro",
+            "Outro"
+        ]
+    )
 
-    if ebitda > 0:
-        score += 30
-    else:
-        score += 0
+    submitted = st.form_submit_button("Salvar Empresa")
 
-    st.header("📈 Resultados")
+    if submitted:
+        cursor.execute(
+            "INSERT INTO empresas (nome, cnpj, data_fundacao, area_atuacao) VALUES (?, ?, ?, ?)",
+            (nome, cnpj, str(data_fundacao), area_atuacao)
+        )
+        conn.commit()
+        st.success("Empresa cadastrada com sucesso!")
 
-    st.write("Receita Líquida:", round(receita_liquida, 2))
-    st.write("Lucro Bruto:", round(lucro_bruto, 2))
-    st.write("EBITDA:", round(ebitda, 2))
-    st.write("Margem EBITDA (%):", round(margem_ebitda, 2))
-    st.write("Margem de Contribuição (%):", round(percentual_mc, 2))
-    st.write("Ponto de Equilíbrio:", round(ponto_equilibrio, 2))
+st.markdown("---")
 
-    st.header("💰 Valuation Estimado")
+# -------------------------------
+# SELEÇÃO DE EMPRESA
+# -------------------------------
 
-    st.write("Valuation Conservador (3x EBITDA):", round(valuation_3x, 2))
-    st.write("Valuation Médio (5x EBITDA):", round(valuation_5x, 2))
-    st.write("Valuation Agressivo (8x EBITDA):", round(valuation_8x, 2))
+st.subheader("📋 Selecionar Empresa")
 
-    st.header("🧠 Score Financeiro")
+cursor.execute("SELECT id, nome FROM empresas")
+empresas = cursor.fetchall()
 
-    st.progress(score / 100)
-    st.write("Score da Empresa:", score, "/ 100")
+if len(empresas) == 0:
+    st.warning("Cadastre uma empresa primeiro.")
+    st.stop()
 
-    st.header("📌 Diagnóstico Automático")
+empresa_dict = {empresa[1]: empresa[0] for empresa in empresas}
 
-    if margem_ebitda < 10:
-        st.warning("Baixa eficiência operacional.")
-    else:
-        st.success("Boa eficiência operacional.")
+empresa_selecionada = st.selectbox(
+    "Escolha a empresa",
+    list(empresa_dict.keys())
+)
 
-    if percentual_mc < 25:
-        st.warning("Margem de contribuição baixa. Rever precificação.")
-    else:
-        st.success("Boa margem de contribuição.")
+empresa_id = empresa_dict[empresa_selecionada]
 
-    if ebitda <= 0:
-        st.error("Empresa não está gerando resultado operacional positivo.")
+st.markdown("---")
+
+# -------------------------------
+# INSERIR DADOS FINANCEIROS
+# -------------------------------
+
+st.subheader("📊 Inserir Dados Financeiros")
+
+with st.form("form_financeiro"):
+    receita_bruta = st.number_input("Receita Bruta", min_value=0.0)
+    custos = st.number_input("Custos", min_value=0.0)
+    despesas = st.number_input("Despesas", min_value=0.0)
+
+    submitted_fin = st.form_submit_button("Salvar Dados Financeiros")
+
+    if submitted_fin:
+        cursor.execute(
+            """
+            INSERT INTO dados_financeiros 
+            (empresa_id, receita_bruta, custos, despesas, data_registro) 
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                empresa_id,
+                receita_bruta,
+                custos,
+                despesas,
+                str(datetime.now())
+            )
+        )
+        conn.commit()
+        st.success("Dados financeiros salvos com sucesso!")
+
+st.markdown("---")
+
+# -------------------------------
+# EXIBIR ÚLTIMO REGISTRO FINANCEIRO
+# -------------------------------
+
+cursor.execute("""
+SELECT receita_bruta, custos, despesas 
+FROM dados_financeiros 
+WHERE empresa_id = ? 
+ORDER BY id DESC 
+LIMIT 1
+""", (empresa_id,))
+
+dados = cursor.fetchone()
+
+if dados:
+
+    receita_bruta, custos, despesas = dados
+
+    receita_liquida = receita_bruta
+    lucro_bruto = receita_liquida - custos
+    ebitda = lucro_bruto - despesas
+
+    margem_ebitda = (ebitda / receita_liquida) * 100 if receita_liquida > 0 else 0
+    margem_contribuicao = (lucro_bruto / receita_liquida) * 100 if receita_liquida > 0 else 0
+    ponto_equilibrio = despesas / (margem_contribuicao / 100) if margem_contribuicao > 0 else 0
+
+    st.subheader("📈 Resultados Financeiros")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Receita Líquida", f"R$ {receita_liquida:,.2f}")
+    col2.metric("Lucro Bruto", f"R$ {lucro_bruto:,.2f}")
+    col3.metric("EBITDA", f"R$ {ebitda:,.2f}")
+
+    st.metric("Margem EBITDA (%)", f"{margem_ebitda:.2f}%")
+    st.metric("Margem de Contribuição (%)", f"{margem_contribuicao:.2f}%")
+    st.metric("Ponto de Equilíbrio", f"R$ {ponto_equilibrio:,.2f}")
+
+    # Valuation simples
+    st.subheader("💰 Valuation Estimado")
+
+    st.write(f"Valuation Conservador (3x EBITDA): R$ {ebitda * 3:,.2f}")
+    st.write(f"Valuation Médio (5x EBITDA): R$ {ebitda * 5:,.2f}")
+    st.write(f"Valuation Agressivo (8x EBITDA): R$ {ebitda * 8:,.2f}")
+
+else:
+    st.info("Ainda não há dados financeiros cadastrados para esta empresa.")
+

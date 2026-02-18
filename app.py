@@ -1,20 +1,18 @@
 import streamlit as st
 import sqlite3
 import bcrypt
+import secrets
+import string
 from datetime import datetime
 
-st.set_page_config(page_title="SaaS Financeiro", layout="wide")
+st.set_page_config(page_title="Plataforma Financeira", layout="wide")
 
-# =========================
-# CONEXÃO COM BANCO
-# =========================
+# ========================
+# BANCO DE DADOS
+# ========================
 
 conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
-
-# =========================
-# CRIAÇÃO DAS TABELAS
-# =========================
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS empresas (
@@ -22,7 +20,11 @@ CREATE TABLE IF NOT EXISTS empresas (
     nome TEXT,
     cnpj TEXT,
     pais_origem TEXT,
-    pais_atuacao TEXT
+    pais_atuacao TEXT,
+    email TEXT,
+    telefone TEXT,
+    whatsapp TEXT,
+    status TEXT
 )
 """)
 
@@ -30,43 +32,17 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empresa_id INTEGER,
-    nome TEXT,
-    email TEXT UNIQUE,
+    email TEXT,
     senha BLOB,
-    tipo TEXT,
-    aceitou_politica INTEGER,
-    data_aceite TEXT,
-    FOREIGN KEY (empresa_id) REFERENCES empresas(id)
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS dados_financeiros (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    empresa_id INTEGER,
-    receita REAL,
-    impostos REAL,
-    despesas REAL,
-    data_lancamento TEXT,
-    FOREIGN KEY (empresa_id) REFERENCES empresas(id)
+    tipo TEXT
 )
 """)
 
 conn.commit()
 
-# =========================
-# SESSION STATE
-# =========================
-
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-    st.session_state.usuario_id = None
-    st.session_state.empresa_id = None
-    st.session_state.tipo = None
-
-# =========================
-# FUNÇÃO HASH SENHA
-# =========================
+# ========================
+# FUNÇÕES
+# ========================
 
 def gerar_hash(senha):
     return bcrypt.hashpw(senha.encode(), bcrypt.gensalt())
@@ -74,36 +50,25 @@ def gerar_hash(senha):
 def verificar_senha(senha_digitada, senha_hash):
     return bcrypt.checkpw(senha_digitada.encode(), senha_hash)
 
-# =========================
-# TELA LOGIN
-# =========================
+def gerar_senha_automatica():
+    caracteres = string.ascii_letters + string.digits + "!@#"
+    return ''.join(secrets.choice(caracteres) for _ in range(10))
 
-def tela_login():
-    st.title("Login")
+# ========================
+# SESSION
+# ========================
 
-    email = st.text_input("Email")
-    senha = st.text_input("Senha", type="password")
+if "logado" not in st.session_state:
+    st.session_state.logado = False
+    st.session_state.tipo = None
+    st.session_state.empresa_id = None
 
-    if st.button("Entrar"):
-        cursor.execute("SELECT * FROM usuarios WHERE email=?", (email,))
-        usuario = cursor.fetchone()
+# ========================
+# FORMULÁRIO PÚBLICO
+# ========================
 
-        if usuario and verificar_senha(senha, usuario[4]):
-            st.session_state.logado = True
-            st.session_state.usuario_id = usuario[0]
-            st.session_state.empresa_id = usuario[1]
-            st.session_state.tipo = usuario[5]
-            st.success("Login realizado com sucesso!")
-            st.rerun()
-        else:
-            st.error("Credenciais inválidas")
-
-# =========================
-# CADASTRO EMPRESA
-# =========================
-
-def tela_cadastro():
-    st.title("Cadastro de Empresa")
+def formulario_publico():
+    st.title("Cadastro da Empresa")
 
     nome = st.text_input("Nome da Empresa")
     cnpj = st.text_input("CNPJ")
@@ -114,111 +79,129 @@ def tela_cadastro():
         ["Brasil", "Estados Unidos", "Portugal", "Canadá"]
     )
 
-    st.markdown("### Criar Usuário Administrador")
+    email = st.text_input("E-mail")
+    telefone = st.text_input("Telefone Fixo (+País +DDD +Número)")
+    whatsapp = st.text_input("WhatsApp (+País +DDD +Número)")
 
-    nome_user = st.text_input("Nome do Admin")
+    if st.button("Enviar Cadastro"):
+        cursor.execute("""
+        INSERT INTO empresas
+        (nome, cnpj, pais_origem, pais_atuacao, email, telefone, whatsapp, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (nome, cnpj, pais_origem, pais_atuacao, email, telefone, whatsapp, "pendente"))
+
+        conn.commit()
+        st.success("Cadastro enviado com sucesso! Aguarde liberação de acesso.")
+
+# ========================
+# LOGIN
+# ========================
+
+def tela_login():
+    st.title("Login Cliente")
+
     email = st.text_input("Email")
     senha = st.text_input("Senha", type="password")
 
-    aceite = st.checkbox("Li e concordo com a Política de Privacidade")
+    if st.button("Entrar"):
+        cursor.execute("SELECT * FROM usuarios WHERE email=?", (email,))
+        usuario = cursor.fetchone()
 
-    if st.button("Cadastrar"):
-        if not aceite:
-            st.error("Você precisa aceitar a Política de Privacidade.")
-            return
+        if usuario and verificar_senha(senha, usuario[3]):
+            st.session_state.logado = True
+            st.session_state.tipo = usuario[4]
+            st.session_state.empresa_id = usuario[1]
+            st.rerun()
+        else:
+            st.error("Credenciais inválidas")
 
-        senha_hash = gerar_hash(senha)
+# ========================
+# SUPER ADMIN
+# ========================
 
-        cursor.execute("""
-        INSERT INTO empresas (nome, cnpj, pais_origem, pais_atuacao)
-        VALUES (?, ?, ?, ?)
-        """, (nome, cnpj, pais_origem, pais_atuacao))
+def painel_admin():
+    st.title("Painel Super Admin")
 
-        empresa_id = cursor.lastrowid
+    cursor.execute("SELECT * FROM empresas WHERE status='pendente'")
+    pendentes = cursor.fetchall()
 
-        cursor.execute("""
-        INSERT INTO usuarios 
-        (empresa_id, nome, email, senha, tipo, aceitou_politica, data_aceite)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            empresa_id,
-            nome_user,
-            email,
-            senha_hash,
-            "admin",
-            1,
-            datetime.now().isoformat()
-        ))
+    st.subheader("Empresas Pendentes")
 
-        conn.commit()
-        st.success("Empresa cadastrada com sucesso!")
+    for empresa in pendentes:
+        st.write(f"Empresa: {empresa[1]} | Email: {empresa[5]}")
 
-# =========================
-# DASHBOARD
-# =========================
+        if st.button(f"Liberar {empresa[0]}"):
+            senha_temp = gerar_senha_automatica()
+            senha_hash = gerar_hash(senha_temp)
 
-def dashboard():
-    st.title("Dashboard Financeiro")
+            cursor.execute("""
+            INSERT INTO usuarios
+            (empresa_id, email, senha, tipo)
+            VALUES (?, ?, ?, ?)
+            """, (empresa[0], empresa[5], senha_hash, "admin"))
 
-    if st.session_state.tipo not in ["admin", "usuario"]:
-        st.error("Acesso negado.")
-        st.stop()
+            cursor.execute("""
+            UPDATE empresas SET status='ativo' WHERE id=?
+            """, (empresa[0],))
 
-    st.subheader("Inserir Dados Financeiros")
+            conn.commit()
 
-    receita = st.number_input("Receita")
-    impostos = st.number_input("Impostos")
-    despesas = st.number_input("Despesas")
+            st.success(f"Acesso liberado! Senha gerada: {senha_temp}")
+            st.info("Envie essa senha para o cliente.")
 
-    if st.button("Salvar Dados"):
-        cursor.execute("""
-        INSERT INTO dados_financeiros
-        (empresa_id, receita, impostos, despesas, data_lancamento)
-        VALUES (?, ?, ?, ?, ?)
-        """, (
-            st.session_state.empresa_id,
-            receita,
-            impostos,
-            despesas,
-            datetime.now().isoformat()
-        ))
-        conn.commit()
-        st.success("Dados salvos!")
+# ========================
+# DASHBOARD CLIENTE
+# ========================
 
-    st.subheader("DRE")
+def dashboard_cliente():
+    st.title("Área do Cliente")
 
     cursor.execute("""
-    SELECT receita, impostos, despesas 
-    FROM dados_financeiros 
-    WHERE empresa_id = ?
+    SELECT nome, cnpj, pais_origem, pais_atuacao
+    FROM empresas WHERE id=?
     """, (st.session_state.empresa_id,))
 
-    dados = cursor.fetchall()
+    empresa = cursor.fetchone()
 
-    total_receita = sum([d[0] for d in dados])
-    total_impostos = sum([d[1] for d in dados])
-    total_despesas = sum([d[2] for d in dados])
-    lucro = total_receita - total_impostos - total_despesas
-
-    st.write("Receita Total:", total_receita)
-    st.write("Impostos:", total_impostos)
-    st.write("Despesas:", total_despesas)
-    st.write("Lucro Líquido:", lucro)
+    st.write("Empresa:", empresa[0])
+    st.write("CNPJ:", empresa[1])
+    st.write("País de Origem:", empresa[2])
+    st.write("País de Atuação:", empresa[3])
 
     if st.button("Sair"):
         st.session_state.clear()
         st.rerun()
 
-# =========================
-# MENU PRINCIPAL
-# =========================
+# ========================
+# SUPER ADMIN FIXO
+# ========================
 
-menu = st.sidebar.selectbox("Menu", ["Login", "Cadastrar Empresa"])
+SUPER_ADMIN_EMAIL = "master@sistema.com"
+SUPER_ADMIN_SENHA = "Master@123"
+
+# ========================
+# MENU
+# ========================
+
+menu = st.sidebar.selectbox("Menu", ["Cadastro Empresa", "Login", "Super Admin"])
 
 if not st.session_state.logado:
-    if menu == "Login":
+
+    if menu == "Cadastro Empresa":
+        formulario_publico()
+
+    elif menu == "Login":
         tela_login()
-    else:
-        tela_cadastro()
+
+    elif menu == "Super Admin":
+        email = st.text_input("Email Admin")
+        senha = st.text_input("Senha Admin", type="password")
+
+        if st.button("Entrar Admin"):
+            if email == SUPER_ADMIN_EMAIL and senha == SUPER_ADMIN_SENHA:
+                painel_admin()
+            else:
+                st.error("Acesso negado")
+
 else:
-    dashboard()
+    dashboard_cliente()

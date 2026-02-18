@@ -76,7 +76,7 @@ def formulario_publico():
 
     pais_atuacao = st.selectbox(
         "País de Atuação",
-        ["Brasil", "Estados Unidos", "Portugal", "Canadá"]
+        ["Brasil", "Paraguai", "Argentina", "Outro"]
     )
 
     email = st.text_input("E-mail")
@@ -205,3 +205,4 @@ if not st.session_state.logado:
 
 else:
     dashboard_cliente()
+

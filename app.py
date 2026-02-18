@@ -3,12 +3,22 @@ import sqlite3
 import hashlib
 import secrets
 import string
+import pandas as pd
+import matplotlib.pyplot as plt
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from reportlab.platypus import Table
+from reportlab.lib.styles import getSampleStyleSheet
+import os
 
-st.set_page_config(page_title="Plataforma Financeira", layout="wide")
+st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
-# ========================
-# BANCO DE DADOS
-# ========================
+# =========================
+# BANCO
+# =========================
 
 conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -18,12 +28,26 @@ CREATE TABLE IF NOT EXISTS empresas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT,
     cnpj TEXT,
-    pais_origem TEXT,
-    pais_atuacao TEXT,
     email TEXT,
     telefone TEXT,
-    whatsapp TEXT,
-    status TEXT
+    status TEXT,
+    plano TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS dre (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    empresa_id INTEGER,
+    receita REAL,
+    impostos REAL,
+    custos REAL,
+    despesas REAL,
+    ebitda REAL,
+    lucro_liquido REAL,
+    margem_ebitda REAL,
+    margem_liquida REAL,
+    score INTEGER
 )
 """)
 
@@ -32,71 +56,118 @@ CREATE TABLE IF NOT EXISTS usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empresa_id INTEGER,
     email TEXT,
-    senha TEXT,
-    tipo TEXT
+    senha TEXT
 )
 """)
 
 conn.commit()
 
-# ========================
-# FUNÇÕES SEGURAS
-# ========================
+# =========================
+# FUNÇÕES
+# =========================
 
 def gerar_hash(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
 
-def verificar_senha(senha_digitada, senha_hash):
-    return gerar_hash(senha_digitada) == senha_hash
+def gerar_senha():
+    return ''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(10))
 
-def gerar_senha_automatica():
-    caracteres = string.ascii_letters + string.digits + "!@#"
-    return ''.join(secrets.choice(caracteres) for _ in range(10))
+def calcular_score(margem_liquida):
+    if margem_liquida >= 20:
+        return 90
+    elif margem_liquida >= 10:
+        return 70
+    elif margem_liquida >= 5:
+        return 50
+    else:
+        return 30
 
-# ========================
+def gerar_pdf(nome, dados):
+    file_name = f"relatorio_{nome}.pdf"
+    doc = SimpleDocTemplate(file_name, pagesize=A4)
+    elements = []
+    styles = getSampleStyleSheet()
+
+    elements.append(Paragraph(f"Relatório Financeiro - {nome}", styles['Heading1']))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    for chave, valor in dados.items():
+        elements.append(Paragraph(f"{chave}: {valor}", styles['Normal']))
+        elements.append(Spacer(1, 0.2 * inch))
+
+    doc.build(elements)
+    return file_name
+
+# =========================
 # SESSION
-# ========================
+# =========================
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.empresa_id = None
-    st.session_state.tipo = None
+    st.session_state.plano = None
 
-# ========================
-# FORMULÁRIO PÚBLICO
-# ========================
+# =========================
+# CADASTRO FREE
+# =========================
 
-def formulario_publico():
-    st.title("Cadastro da Empresa")
+def cadastro_free():
+    st.title("Diagnóstico Financeiro Gratuito")
 
     nome = st.text_input("Nome da Empresa")
     cnpj = st.text_input("CNPJ")
-    pais_origem = st.text_input("País de Origem")
-
-    pais_atuacao = st.selectbox(
-        "País de Atuação",
-        ["Brasil", "Estados Unidos", "Portugal", "Canadá"]
-    )
-
     email = st.text_input("E-mail")
-    telefone = st.text_input("Telefone Fixo (+País +DDD +Número)")
-    whatsapp = st.text_input("WhatsApp (+País +DDD +Número)")
+    telefone = st.text_input("Telefone")
 
-    if st.button("Enviar Cadastro"):
+    st.subheader("Preencha seu DRE")
+
+    receita = st.number_input("Receita Bruta", min_value=0.0)
+    impostos = st.number_input("Impostos", min_value=0.0)
+    custos = st.number_input("Custos", min_value=0.0)
+    despesas = st.number_input("Despesas Operacionais", min_value=0.0)
+
+    if st.button("Gerar Diagnóstico Gratuito"):
+
+        ebitda = receita - impostos - custos
+        lucro_liquido = receita - impostos - custos - despesas
+        margem_ebitda = (ebitda / receita) * 100 if receita > 0 else 0
+        margem_liquida = (lucro_liquido / receita) * 100 if receita > 0 else 0
+        score = calcular_score(margem_liquida)
+
         cursor.execute("""
-        INSERT INTO empresas
-        (nome, cnpj, pais_origem, pais_atuacao, email, telefone, whatsapp, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (nome, cnpj, pais_origem, pais_atuacao, email, telefone, whatsapp, "pendente"))
+        INSERT INTO empresas (nome, cnpj, email, telefone, status, plano)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (nome, cnpj, email, telefone, "pendente", "free"))
+
+        empresa_id = cursor.lastrowid
+
+        cursor.execute("""
+        INSERT INTO dre
+        (empresa_id, receita, impostos, custos, despesas,
+        ebitda, lucro_liquido, margem_ebitda, margem_liquida, score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (empresa_id, receita, impostos, custos, despesas,
+              ebitda, lucro_liquido, margem_ebitda, margem_liquida, score))
 
         conn.commit()
-        st.success("Cadastro enviado! Aguarde liberação de acesso.")
 
-# ========================
-# LOGIN CLIENTE
-# ========================
+        st.success("Diagnóstico Gerado!")
 
-def tela_login():
+        # ===== TEASER =====
+        st.subheader("Resumo Gratuito")
+
+        if margem_liquida < 10:
+            st.warning("Sua margem está abaixo da média do mercado.")
+        else:
+            st.success("Sua margem está saudável.")
+
+        st.info("Libere o acesso Premium para ver gráficos detalhados e baixar o relatório completo.")
+
+# =========================
+# LOGIN
+# =========================
+
+def login():
     st.title("Login Cliente")
 
     email = st.text_input("Email")
@@ -104,112 +175,109 @@ def tela_login():
 
     if st.button("Entrar"):
         cursor.execute("SELECT * FROM usuarios WHERE email=?", (email,))
-        usuario = cursor.fetchone()
+        user = cursor.fetchone()
 
-        if usuario and verificar_senha(senha, usuario[3]):
+        if user and gerar_hash(senha) == user[3]:
             st.session_state.logado = True
-            st.session_state.empresa_id = usuario[1]
-            st.session_state.tipo = usuario[4]
+            st.session_state.empresa_id = user[1]
+
+            cursor.execute("SELECT plano FROM empresas WHERE id=?", (user[1],))
+            plano = cursor.fetchone()[0]
+            st.session_state.plano = plano
+
             st.rerun()
         else:
             st.error("Credenciais inválidas")
 
-# ========================
-# PAINEL SUPER ADMIN
-# ========================
+# =========================
+# DASHBOARD
+# =========================
 
-def painel_admin():
+def dashboard():
+    st.title("Painel Financeiro")
+
+    cursor.execute("SELECT nome, plano FROM empresas WHERE id=?", (st.session_state.empresa_id,))
+    empresa = cursor.fetchone()
+
+    cursor.execute("SELECT * FROM dre WHERE empresa_id=?", (st.session_state.empresa_id,))
+    dre = cursor.fetchone()
+
+    receita = dre[2]
+    lucro = dre[7]
+    margem_liquida = dre[9]
+    score = dre[10]
+
+    st.metric("Margem Líquida (%)", round(margem_liquida,2))
+    st.metric("Score Financeiro", score)
+
+    if st.session_state.plano == "premium":
+
+        fig = plt.figure()
+        plt.bar(["Receita", "Lucro"], [receita, lucro])
+        st.pyplot(fig)
+
+        dados = {
+            "Receita": receita,
+            "Lucro Líquido": lucro,
+            "Margem Líquida (%)": margem_liquida,
+            "Score": score
+        }
+
+        pdf = gerar_pdf(empresa[0], dados)
+
+        with open(pdf, "rb") as f:
+            st.download_button("Baixar Relatório PDF", f, file_name=pdf)
+
+    else:
+        st.warning("Plano Free não inclui gráficos nem PDF.")
+
+# =========================
+# SUPER ADMIN
+# =========================
+
+def super_admin():
     st.title("Painel Super Admin")
 
     cursor.execute("SELECT * FROM empresas WHERE status='pendente'")
-    pendentes = cursor.fetchall()
+    empresas = cursor.fetchall()
 
-    if not pendentes:
-        st.info("Nenhuma empresa pendente.")
-        return
-
-    for empresa in pendentes:
+    for emp in empresas:
         st.write("---")
-        st.write(f"Empresa: {empresa[1]}")
-        st.write(f"E-mail: {empresa[5]}")
-        st.write(f"Telefone: {empresa[6]}")
+        st.write(emp[1], "-", emp[2])
 
-        if st.button(f"Liberar {empresa[0]}"):
-            senha_temp = gerar_senha_automatica()
-            senha_hash = gerar_hash(senha_temp)
+        if st.button(f"Liberar Premium {emp[0]}"):
 
-            cursor.execute("""
-            INSERT INTO usuarios
-            (empresa_id, email, senha, tipo)
-            VALUES (?, ?, ?, ?)
-            """, (empresa[0], empresa[5], senha_hash, "admin"))
+            senha = gerar_senha()
+            senha_hash = gerar_hash(senha)
 
             cursor.execute("""
-            UPDATE empresas SET status='ativo' WHERE id=?
-            """, (empresa[0],))
+            INSERT INTO usuarios (empresa_id, email, senha)
+            VALUES (?, ?, ?)
+            """, (emp[0], emp[3], senha_hash))
+
+            cursor.execute("""
+            UPDATE empresas SET status='ativo', plano='premium'
+            WHERE id=?
+            """, (emp[0],))
 
             conn.commit()
 
-            st.success("Acesso liberado!")
-            st.warning(f"Senha gerada: {senha_temp}")
-            st.info("Envie essa senha ao cliente.")
+            st.success(f"Acesso liberado! Senha: {senha}")
 
-# ========================
-# DASHBOARD CLIENTE
-# ========================
-
-def dashboard_cliente():
-    st.title("Área do Cliente")
-
-    cursor.execute("""
-    SELECT nome, cnpj, pais_origem, pais_atuacao
-    FROM empresas WHERE id=?
-    """, (st.session_state.empresa_id,))
-
-    empresa = cursor.fetchone()
-
-    if empresa:
-        st.write("Empresa:", empresa[0])
-        st.write("CNPJ:", empresa[1])
-        st.write("País de Origem:", empresa[2])
-        st.write("País de Atuação:", empresa[3])
-
-    if st.button("Sair"):
-        st.session_state.clear()
-        st.rerun()
-
-# ========================
-# SUPER ADMIN FIXO
-# ========================
-
-SUPER_ADMIN_EMAIL = "master@sistema.com"
-SUPER_ADMIN_SENHA = "Master@123"
-
-# ========================
+# =========================
 # MENU
-# ========================
+# =========================
 
-menu = st.sidebar.selectbox("Menu", ["Cadastro Empresa", "Login", "Super Admin"])
+menu = st.sidebar.selectbox("Menu", ["Diagnóstico Gratuito", "Login", "Super Admin"])
 
 if not st.session_state.logado:
 
-    if menu == "Cadastro Empresa":
-        formulario_publico()
-
+    if menu == "Diagnóstico Gratuito":
+        cadastro_free()
     elif menu == "Login":
-        tela_login()
-
+        login()
     elif menu == "Super Admin":
-        st.title("Acesso Super Admin")
-
-        email = st.text_input("Email Admin")
-        senha = st.text_input("Senha Admin", type="password")
-
-        if st.button("Entrar Admin"):
-            if email == SUPER_ADMIN_EMAIL and senha == SUPER_ADMIN_SENHA:
-                painel_admin()
-            else:
-                st.error("Acesso negado")
+        super_admin()
 
 else:
-    dashboard_cliente()
+    dashboard()

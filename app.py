@@ -14,12 +14,17 @@ st.markdown("Sistema de análise financeira, DRE completo e valuation por empres
 conn = sqlite3.connect("empresas.db", check_same_thread=False)
 cursor = conn.cursor()
 
+# 🔥 APAGA TABELAS ANTIGAS (FASE DE DESENVOLVIMENTO)
+cursor.execute("DROP TABLE IF EXISTS dados_financeiros")
+cursor.execute("DROP TABLE IF EXISTS empresas")
+conn.commit()
+
 # -------------------------------
-# CRIAÇÃO DAS TABELAS
+# CRIAÇÃO DAS TABELAS ATUALIZADAS
 # -------------------------------
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS empresas (
+CREATE TABLE empresas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT,
     cnpj TEXT,
@@ -29,7 +34,7 @@ CREATE TABLE IF NOT EXISTS empresas (
 """)
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS dados_financeiros (
+CREATE TABLE dados_financeiros (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     empresa_id INTEGER,
     receita_bruta REAL,
@@ -171,56 +176,35 @@ if dados:
 
     receita_bruta, deducoes, custos, despesas_adm, despesas_comerciais, depreciacao, resultado_financeiro, impostos = dados
 
-    # -------------------------------
-    # CÁLCULO DO DRE
-    # -------------------------------
-
     receita_liquida = receita_bruta - deducoes
     lucro_bruto = receita_liquida - custos
-
     despesas_operacionais = despesas_adm + despesas_comerciais
     ebitda = lucro_bruto - despesas_operacionais
-
     ebit = ebitda - depreciacao
     lucro_antes_ir = ebit + resultado_financeiro
     lucro_liquido = lucro_antes_ir - impostos
-
-    # -------------------------------
-    # EXIBIÇÃO DO DRE
-    # -------------------------------
 
     st.subheader("📑 Demonstração do Resultado (DRE)")
 
     st.write(f"Receita Bruta: R$ {receita_bruta:,.2f}")
     st.write(f"(-) Deduções: R$ {deducoes:,.2f}")
     st.write(f"= Receita Líquida: R$ {receita_liquida:,.2f}")
-
     st.write(f"(-) Custos: R$ {custos:,.2f}")
     st.write(f"= Lucro Bruto: R$ {lucro_bruto:,.2f}")
-
     st.write(f"(-) Despesas Operacionais: R$ {despesas_operacionais:,.2f}")
     st.write(f"= EBITDA: R$ {ebitda:,.2f}")
-
     st.write(f"(-) Depreciação: R$ {depreciacao:,.2f}")
     st.write(f"= EBIT: R$ {ebit:,.2f}")
-
     st.write(f"(+) Resultado Financeiro: R$ {resultado_financeiro:,.2f}")
     st.write(f"= Lucro Antes do IR: R$ {lucro_antes_ir:,.2f}")
-
     st.write(f"(-) Impostos: R$ {impostos:,.2f}")
     st.write(f"= Lucro Líquido: R$ {lucro_liquido:,.2f}")
 
     st.markdown("---")
-
-    # -------------------------------
-    # VALUATION
-    # -------------------------------
-
     st.subheader("💰 Valuation Estimado")
-
-    st.write(f"Valuation Conservador (3x EBITDA): R$ {ebitda * 3:,.2f}")
-    st.write(f"Valuation Médio (5x EBITDA): R$ {ebitda * 5:,.2f}")
-    st.write(f"Valuation Agressivo (8x EBITDA): R$ {ebitda * 8:,.2f}")
+    st.write(f"3x EBITDA: R$ {ebitda * 3:,.2f}")
+    st.write(f"5x EBITDA: R$ {ebitda * 5:,.2f}")
+    st.write(f"8x EBITDA: R$ {ebitda * 8:,.2f}")
 
 else:
     st.info("Ainda não há DRE cadastrado para esta empresa.")

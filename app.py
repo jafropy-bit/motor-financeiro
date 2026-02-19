@@ -8,7 +8,7 @@ st.set_page_config(page_title="Motor Financeiro", layout="wide")
 # ---------------------------
 # CONFIGURAÇÃO
 # ---------------------------
-VERSAO = "FREE"  # ALTERE PARA PREMIUM PARA LIBERAR
+VERSAO = "FREE"  # ALTERE PARA "PREMIUM" PARA LIBERAR TUDO
 
 # ---------------------------
 # SESSION STATE
@@ -40,7 +40,7 @@ if not st.session_state.logado:
     st.stop()
 
 # ---------------------------
-# CADASTRO EMPRESA
+# SIDEBAR - EMPRESA
 # ---------------------------
 st.sidebar.title("🏢 Dados da Empresa")
 
@@ -50,12 +50,6 @@ setor = st.sidebar.selectbox(
     "Setor",
     ["Comércio", "Serviços", "Indústria", "Tecnologia"]
 )
-
-st.session_state.empresa = {
-    "nome": empresa_nome,
-    "cnpj": cnpj,
-    "setor": setor
-}
 
 # ---------------------------
 # TÍTULO
@@ -131,6 +125,39 @@ if receita > 0:
         col4.metric("Margem Líquida", f"{margem_liquida:.2f}%")
         col5.metric("Score Financeiro", f"{score}/100")
 
+        # DATAFRAME CORRETO (SEM ERRO DE CHAVE)
         df = pd.DataFrame({
             "Indicador": ["Receita", "EBITDA", "Lucro Líquido"],
-            "Valor": [receita, ebitda]()
+            "Valor": [receita, ebitda, lucro_liquido]
+        })
+
+        fig = px.bar(df, x="Indicador", y="Valor")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # ---------------- PDF ----------------
+        if st.button("📄 Gerar Relatório PDF"):
+
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+
+            pdf.cell(200, 10, "Relatório Financeiro", ln=True)
+            pdf.cell(200, 10, f"Empresa: {empresa_nome}", ln=True)
+            pdf.cell(200, 10, f"CNPJ: {cnpj}", ln=True)
+            pdf.cell(200, 10, f"Setor: {setor}", ln=True)
+            pdf.cell(200, 10, f"Margem EBITDA: {margem_ebitda:.2f}%", ln=True)
+            pdf.cell(200, 10, f"Margem Líquida: {margem_liquida:.2f}%", ln=True)
+            pdf.cell(200, 10, f"Score: {score}/100", ln=True)
+
+            pdf.output("relatorio.pdf")
+
+            with open("relatorio.pdf", "rb") as file:
+                st.download_button(
+                    label="Baixar PDF",
+                    data=file,
+                    file_name="relatorio_financeiro.pdf",
+                    mime="application/pdf"
+                )
+
+else:
+    st.info("Insira a Receita para iniciar a análise.")

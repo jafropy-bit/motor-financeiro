@@ -1,88 +1,114 @@
 import streamlit as st
-import sqlite3
-import hashlib
-import secrets
-import string
-import matplotlib.pyplot as plt
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
+import pandas as pd
+import plotly.express as px
+from fpdf import FPDF
 
 st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
-# ========================
-# CONEXÃO BANCO
-# ========================
+# ------------------------
+# CONFIGURAÇÃO
+# ------------------------
+VERSAO = "FREE"  # Mude para PREMIUM para liberar tudo
 
-conn = sqlite3.connect("sistema.db", check_same_thread=False)
-cursor = conn.cursor()
+st.title("📊 Motor Financeiro - Análise de DRE")
 
-# ========================
-# CRIAR TABELAS
-# ========================
+st.markdown("Insira os dados do seu DRE abaixo:")
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS empresas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT,
-    cnpj TEXT,
-    email TEXT,
-    telefone TEXT,
-    status TEXT,
-    plano TEXT
-)
-""")
+# ------------------------
+# INPUTS
+# ------------------------
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS dre (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    empresa_id INTEGER,
-    receita REAL,
-    impostos REAL,
-    custos REAL,
-    despesas REAL,
-    ebitda REAL,
-    lucro_liquido REAL,
-    margem_ebitda REAL,
-    margem_liquida REAL,
-    score INTEGER
-)
-""")
+col1, col2 = st.columns(2)
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    empresa_id INTEGER,
-    email TEXT,
-    senha TEXT
-)
-""")
+with col1:
+    receita = st.number_input("Receita Bruta", min_value=0.0)
+    impostos = st.number_input("Impostos", min_value=0.0)
+    custos = st.number_input("Custos", min_value=0.0)
 
-conn.commit()
+with col2:
+    despesas = st.number_input("Despesas Operacionais", min_value=0.0)
+    depreciacao = st.number_input("Depreciação", min_value=0.0)
+    juros = st.number_input("Juros", min_value=0.0)
 
-# ========================
-# FUNÇÕES
-# ========================
+# ------------------------
+# CÁLCULOS
+# ------------------------
 
-def gerar_hash(senha):
-    return hashlib.sha256(senha.encode()).hexdigest()
-
-def gerar_senha():
-    return ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(10))
-
-def calcular_score(margem):
-    if margem >= 20:
-        return 90
-    elif margem >= 10:
-        return 75
-    elif margem >= 5:
-        return 60
+if receita > 0:
+    ebitda = receita - impostos - custos - despesas
+    lucro_liquido = ebitda - depreciacao - juros
+    
+    margem_ebitda = (ebitda / receita) * 100
+    margem_liquida = (lucro_liquido / receita) * 100
+    
+    # Score simples
+    score = 0
+    if margem_ebitda > 20:
+        score += 40
+    elif margem_ebitda > 10:
+        score += 25
     else:
-        return 40
+        score += 10
+        
+    if margem_liquida > 10:
+        score += 60
+    elif margem_liquida > 5:
+        score += 40
+    else:
+        score += 20
 
-def gerar_pdf(nome, receita, lucro, margem, score):
-    file_name = f"relatorio_{nome}.pdf"
-    doc = SimpleDocTemplate(file_name, pagesize=A4)
-    elements = []
-    styles = getSampleStyle
+    st.divider()
+    st.subheader("📈 Resultado")
+
+    # ------------------------
+    # VERSÃO FREE
+    # ------------------------
+    if VERSAO == "FREE":
+        st.metric("Margem EBITDA", f"{margem_ebitda:.2f}%")
+        
+        st.warning("🔒 Sua margem está abaixo da média do mercado.")
+        st.info("Libere o Premium para ver Score, gráficos e relatório em PDF.")
+
+    # ------------------------
+    # VERSÃO PREMIUM
+    # ------------------------
+    if VERSAO == "PREMIUM":
+
+        col3, col4, col5 = st.columns(3)
+
+        col3.metric("Margem EBITDA", f"{margem_ebitda:.2f}%")
+        col4.metric("Margem Líquida", f"{margem_liquida:.2f}%")
+        col5.metric("Score Financeiro", f"{score}/100")
+
+        # GRÁFICO
+        df = pd.DataFrame({
+            "Indicador": ["Receita", "EBITDA", "Lucro Líquido"],
+            "Valor": [receita, ebitda, lucro_liquido]
+        })
+
+        fig = px.bar(df, x="Indicador", y="Valor")
+        st.plotly_chart(fig, use_container_width=True)
+
+        # PDF
+        if st.button("📄 Gerar Relatório PDF"):
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            
+            pdf.cell(200, 10, txt="Relatório Financeiro", ln=True)
+            pdf.cell(200, 10, txt=f"Margem EBITDA: {margem_ebitda:.2f}%", ln=True)
+            pdf.cell(200, 10, txt=f"Margem Líquida: {margem_liquida:.2f}%", ln=True)
+            pdf.cell(200, 10, txt=f"Score: {score}/100", ln=True)
+
+            pdf.output("relatorio.pdf")
+
+            with open("relatorio.pdf", "rb") as file:
+                st.download_button(
+                    label="Baixar PDF",
+                    data=file,
+                    file_name="relatorio_financeiro.pdf",
+                    mime="application/pdf"
+                )
+
+else:
+    st.info("Insira a Receita para iniciar a análise.")

@@ -3,25 +3,46 @@ import sqlite3
 import hashlib
 import secrets
 import string
-import pandas as pd
 import matplotlib.pyplot as plt
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import inch
-from reportlab.platypus import Table
-from reportlab.lib.styles import getSampleStyleSheet
 import os
 
 st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
-# =========================
-# BANCO
-# =========================
+# ==========================
+# CONEXÃO BANCO
+# ==========================
 
 conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
+
+# ==========================
+# RESET INTELIGENTE (ANTI ERRO CLOUD)
+# ==========================
+
+def tabela_existe(nome):
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (nome,))
+    return cursor.fetchone() is not None
+
+def coluna_existe(tabela, coluna):
+    cursor.execute(f"PRAGMA table_info({tabela})")
+    colunas = [col[1] for col in cursor.fetchall()]
+    return coluna in colunas
+
+# Se estrutura antiga existir, apaga tudo
+if tabela_existe("empresas"):
+    if not coluna_existe("empresas", "plano"):
+        cursor.execute("DROP TABLE empresas")
+        cursor.execute("DROP TABLE dre")
+        cursor.execute("DROP TABLE usuarios")
+        conn.commit()
+
+# ==========================
+# CRIAR TABELAS
+# ==========================
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS empresas (
@@ -62,9 +83,9 @@ CREATE TABLE IF NOT EXISTS usuarios (
 
 conn.commit()
 
-# =========================
+# ==========================
 # FUNÇÕES
-# =========================
+# ==========================
 
 def gerar_hash(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
@@ -76,13 +97,13 @@ def calcular_score(margem_liquida):
     if margem_liquida >= 20:
         return 90
     elif margem_liquida >= 10:
-        return 70
+        return 75
     elif margem_liquida >= 5:
-        return 50
+        return 60
     else:
-        return 30
+        return 40
 
-def gerar_pdf(nome, dados):
+def gerar_pdf(nome, receita, lucro, margem, score):
     file_name = f"relatorio_{nome}.pdf"
     doc = SimpleDocTemplate(file_name, pagesize=A4)
     elements = []
@@ -91,25 +112,26 @@ def gerar_pdf(nome, dados):
     elements.append(Paragraph(f"Relatório Financeiro - {nome}", styles['Heading1']))
     elements.append(Spacer(1, 0.5 * inch))
 
-    for chave, valor in dados.items():
-        elements.append(Paragraph(f"{chave}: {valor}", styles['Normal']))
-        elements.append(Spacer(1, 0.2 * inch))
+    elements.append(Paragraph(f"Receita: R$ {receita}", styles['Normal']))
+    elements.append(Paragraph(f"Lucro Líquido: R$ {lucro}", styles['Normal']))
+    elements.append(Paragraph(f"Margem Líquida: {round(margem,2)}%", styles['Normal']))
+    elements.append(Paragraph(f"Score Financeiro: {score}", styles['Normal']))
 
     doc.build(elements)
     return file_name
 
-# =========================
+# ==========================
 # SESSION
-# =========================
+# ==========================
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
     st.session_state.empresa_id = None
     st.session_state.plano = None
 
-# =========================
-# CADASTRO FREE
-# =========================
+# ==========================
+# DIAGNÓSTICO GRATUITO
+# ==========================
 
 def cadastro_free():
     st.title("Diagnóstico Financeiro Gratuito")
@@ -129,155 +151,9 @@ def cadastro_free():
     if st.button("Gerar Diagnóstico Gratuito"):
 
         ebitda = receita - impostos - custos
-        lucro_liquido = receita - impostos - custos - despesas
-        margem_ebitda = (ebitda / receita) * 100 if receita > 0 else 0
-        margem_liquida = (lucro_liquido / receita) * 100 if receita > 0 else 0
+        lucro = receita - impostos - custos - despesas
+        margem_ebitda = (ebitda / receita * 100) if receita > 0 else 0
+        margem_liquida = (lucro / receita * 100) if receita > 0 else 0
         score = calcular_score(margem_liquida)
 
-        cursor.execute("""
-        INSERT INTO empresas (nome, cnpj, email, telefone, status, plano)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """, (nome, cnpj, email, telefone, "pendente", "free"))
-
-        empresa_id = cursor.lastrowid
-
-        cursor.execute("""
-        INSERT INTO dre
-        (empresa_id, receita, impostos, custos, despesas,
-        ebitda, lucro_liquido, margem_ebitda, margem_liquida, score)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (empresa_id, receita, impostos, custos, despesas,
-              ebitda, lucro_liquido, margem_ebitda, margem_liquida, score))
-
-        conn.commit()
-
-        st.success("Diagnóstico Gerado!")
-
-        # ===== TEASER =====
-        st.subheader("Resumo Gratuito")
-
-        if margem_liquida < 10:
-            st.warning("Sua margem está abaixo da média do mercado.")
-        else:
-            st.success("Sua margem está saudável.")
-
-        st.info("Libere o acesso Premium para ver gráficos detalhados e baixar o relatório completo.")
-
-# =========================
-# LOGIN
-# =========================
-
-def login():
-    st.title("Login Cliente")
-
-    email = st.text_input("Email")
-    senha = st.text_input("Senha", type="password")
-
-    if st.button("Entrar"):
-        cursor.execute("SELECT * FROM usuarios WHERE email=?", (email,))
-        user = cursor.fetchone()
-
-        if user and gerar_hash(senha) == user[3]:
-            st.session_state.logado = True
-            st.session_state.empresa_id = user[1]
-
-            cursor.execute("SELECT plano FROM empresas WHERE id=?", (user[1],))
-            plano = cursor.fetchone()[0]
-            st.session_state.plano = plano
-
-            st.rerun()
-        else:
-            st.error("Credenciais inválidas")
-
-# =========================
-# DASHBOARD
-# =========================
-
-def dashboard():
-    st.title("Painel Financeiro")
-
-    cursor.execute("SELECT nome, plano FROM empresas WHERE id=?", (st.session_state.empresa_id,))
-    empresa = cursor.fetchone()
-
-    cursor.execute("SELECT * FROM dre WHERE empresa_id=?", (st.session_state.empresa_id,))
-    dre = cursor.fetchone()
-
-    receita = dre[2]
-    lucro = dre[7]
-    margem_liquida = dre[9]
-    score = dre[10]
-
-    st.metric("Margem Líquida (%)", round(margem_liquida,2))
-    st.metric("Score Financeiro", score)
-
-    if st.session_state.plano == "premium":
-
-        fig = plt.figure()
-        plt.bar(["Receita", "Lucro"], [receita, lucro])
-        st.pyplot(fig)
-
-        dados = {
-            "Receita": receita,
-            "Lucro Líquido": lucro,
-            "Margem Líquida (%)": margem_liquida,
-            "Score": score
-        }
-
-        pdf = gerar_pdf(empresa[0], dados)
-
-        with open(pdf, "rb") as f:
-            st.download_button("Baixar Relatório PDF", f, file_name=pdf)
-
-    else:
-        st.warning("Plano Free não inclui gráficos nem PDF.")
-
-# =========================
-# SUPER ADMIN
-# =========================
-
-def super_admin():
-    st.title("Painel Super Admin")
-
-    cursor.execute("SELECT * FROM empresas WHERE status='pendente'")
-    empresas = cursor.fetchall()
-
-    for emp in empresas:
-        st.write("---")
-        st.write(emp[1], "-", emp[2])
-
-        if st.button(f"Liberar Premium {emp[0]}"):
-
-            senha = gerar_senha()
-            senha_hash = gerar_hash(senha)
-
-            cursor.execute("""
-            INSERT INTO usuarios (empresa_id, email, senha)
-            VALUES (?, ?, ?)
-            """, (emp[0], emp[3], senha_hash))
-
-            cursor.execute("""
-            UPDATE empresas SET status='ativo', plano='premium'
-            WHERE id=?
-            """, (emp[0],))
-
-            conn.commit()
-
-            st.success(f"Acesso liberado! Senha: {senha}")
-
-# =========================
-# MENU
-# =========================
-
-menu = st.sidebar.selectbox("Menu", ["Diagnóstico Gratuito", "Login", "Super Admin"])
-
-if not st.session_state.logado:
-
-    if menu == "Diagnóstico Gratuito":
-        cadastro_free()
-    elif menu == "Login":
-        login()
-    elif menu == "Super Admin":
-        super_admin()
-
-else:
-    dashboard()
+        cursor.

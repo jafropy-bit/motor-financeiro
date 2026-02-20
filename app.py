@@ -8,24 +8,24 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.platypus import TableStyle
 from reportlab.lib.pagesizes import A4
-import os
 from datetime import datetime
 
 st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
 # ==============================
-# CONEXÃO BANCO
+# CONEXÃO
 # ==============================
 
 conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
 
 # ==============================
-# CRIA TABELAS SE NÃO EXISTIR
+# RECRIA TABELA USUÁRIOS CORRETAMENTE
 # ==============================
 
+cursor.execute("DROP TABLE IF EXISTS usuarios")
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS usuarios (
+CREATE TABLE usuarios (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nome TEXT,
     email TEXT UNIQUE,
@@ -34,8 +34,13 @@ CREATE TABLE IF NOT EXISTS usuarios (
 )
 """)
 
+# ==============================
+# RECRIA TABELA EMPRESAS
+# ==============================
+
+cursor.execute("DROP TABLE IF EXISTS empresas")
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS empresas (
+CREATE TABLE empresas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER,
     nome_empresa TEXT,
@@ -51,19 +56,17 @@ CREATE TABLE IF NOT EXISTS empresas (
 conn.commit()
 
 # ==============================
-# GARANTE ADMIN AUTOMÁTICO
+# CRIA ADMIN GARANTIDO
 # ==============================
 
-cursor.execute("SELECT * FROM usuarios WHERE email = ?", ("admin@motorfinanceiro.com",))
-admin = cursor.fetchone()
+senha_admin = hashlib.sha256("admin123".encode()).hexdigest()
 
-if not admin:
-    senha_admin = hashlib.sha256("admin123".encode()).hexdigest()
-    cursor.execute("""
-    INSERT INTO usuarios (nome, email, senha, plano)
-    VALUES (?, ?, ?, ?)
-    """, ("Administrador", "admin@motorfinanceiro.com", senha_admin, "admin"))
-    conn.commit()
+cursor.execute("""
+INSERT INTO usuarios (nome, email, senha, plano)
+VALUES (?, ?, ?, ?)
+""", ("Administrador", "admin@motorfinanceiro.com", senha_admin, "admin"))
+
+conn.commit()
 
 # ==============================
 # FUNÇÕES
@@ -107,7 +110,7 @@ if "pagina" not in st.session_state:
     st.session_state.pagina = 1
 
 # ==============================
-# BOTÃO ADMIN (CANTO SUPERIOR)
+# BOTÃO ADMIN
 # ==============================
 
 col1, col2 = st.columns([9,1])
@@ -116,7 +119,7 @@ with col2:
         st.session_state.pagina = "admin"
 
 # ==============================
-# PÁGINA 1 – EMPRESA
+# PÁGINA 1
 # ==============================
 
 if st.session_state.pagina == 1:
@@ -139,7 +142,7 @@ if st.session_state.pagina == 1:
         st.rerun()
 
 # ==============================
-# PÁGINA 2 – FINANCEIRO
+# PÁGINA 2
 # ==============================
 
 elif st.session_state.pagina == 2:
@@ -162,7 +165,7 @@ elif st.session_state.pagina == 2:
         st.rerun()
 
 # ==============================
-# PÁGINA 3 – LOGIN CLIENTE
+# PÁGINA 3 LOGIN
 # ==============================
 
 elif st.session_state.pagina == 3:
@@ -182,7 +185,7 @@ elif st.session_state.pagina == 3:
             st.error("Acesso negado")
 
 # ==============================
-# PÁGINA 4 – RESULTADO
+# PÁGINA 4 RESULTADO
 # ==============================
 
 elif st.session_state.pagina == 4:
@@ -200,32 +203,10 @@ elif st.session_state.pagina == 4:
         "Valor": [receita, lucro, margem]
     })
 
-    st.subheader("Resultado DRE")
     st.dataframe(df)
 
     fig = px.bar(df, x="Indicador", y="Valor")
     st.plotly_chart(fig, use_container_width=True)
-
-    # Salva histórico
-    cursor.execute("""
-    INSERT INTO empresas (usuario_id, nome_empresa, cnpj, cidade, estado, receita, lucro, data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        usuario[0],
-        empresa["nome"],
-        empresa["cnpj"],
-        empresa["cidade"],
-        empresa["estado"],
-        receita,
-        lucro,
-        datetime.now().strftime("%d/%m/%Y")
-    ))
-    conn.commit()
-
-    if st.button("Gerar Relatório PDF"):
-        arquivo = gerar_pdf(empresa["nome"], df)
-        with open(arquivo, "rb") as f:
-            st.download_button("Baixar PDF", f, file_name=arquivo)
 
 # ==============================
 # PAINEL ADMIN
@@ -240,24 +221,8 @@ elif st.session_state.pagina == "admin":
 
     if st.button("Entrar Admin"):
         usuario = login(email, senha)
-
         if usuario and usuario[4] == "admin":
             st.success("Bem-vindo Admin")
-
-            st.subheader("Usuários")
-            st.dataframe(pd.read_sql_query("SELECT id, nome, email, plano FROM usuarios", conn))
-
-            st.subheader("Histórico Empresas")
-            st.dataframe(pd.read_sql_query("SELECT * FROM empresas", conn))
-
-            st.subheader("Alterar Plano")
-            user_id = st.number_input("ID do usuário", step=1)
-            plano = st.selectbox("Plano", ["free", "pago"])
-
-            if st.button("Atualizar Plano"):
-                cursor.execute("UPDATE usuarios SET plano = ? WHERE id = ?", (plano, user_id))
-                conn.commit()
-                st.success("Plano atualizado")
-
+            st.dataframe(pd.read_sql_query("SELECT * FROM usuarios", conn))
         else:
             st.error("Acesso negado")

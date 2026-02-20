@@ -1,22 +1,25 @@
 import streamlit as st
 import sqlite3
-import pandas as pd
 import hashlib
+import pandas as pd
 import plotly.express as px
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+import io
 from datetime import datetime
 
-st.set_page_config(page_title="Motor Financeiro", layout="wide")
+# ==========================
+# CONFIG
+# ==========================
 
-# =============================
-# CONEXÃO
-# =============================
+st.set_page_config(page_title="Motor Financeiro SaaS", layout="wide")
 
-conn = sqlite3.connect("sistema.db", check_same_thread=False)
+# ==========================
+# BANCO DE DADOS
+# ==========================
+
+conn = sqlite3.connect("motor_financeiro.db", check_same_thread=False)
 cursor = conn.cursor()
-
-# =============================
-# CRIA TABELAS
-# =============================
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS usuarios (
@@ -24,7 +27,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
     nome TEXT,
     email TEXT UNIQUE,
     senha TEXT,
-    plano TEXT
+    plano TEXT DEFAULT 'free',
+    aprovado INTEGER DEFAULT 0
 )
 """)
 
@@ -33,6 +37,7 @@ CREATE TABLE IF NOT EXISTS empresas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER,
     nome_empresa TEXT,
+    cnpj TEXT,
     receita REAL,
     lucro REAL,
     data TEXT
@@ -41,176 +46,207 @@ CREATE TABLE IF NOT EXISTS empresas (
 
 conn.commit()
 
-# =============================
-# GARANTE ADMIN
-# =============================
+# ==========================
+# CRIAR ADMIN AUTOMÁTICO
+# ==========================
 
-cursor.execute("SELECT * FROM usuarios WHERE email=?", ("admin@motorfinanceiro.com",))
+def hash_senha(senha):
+    return hashlib.sha256(senha.encode()).hexdigest()
+
+admin_email = "admin@motorfinanceiro.com"
+admin_senha = hash_senha("123456")
+
+cursor.execute("SELECT * FROM usuarios WHERE email=?", (admin_email,))
 if not cursor.fetchone():
-    senha_admin = hashlib.sha256("admin123".encode()).hexdigest()
     cursor.execute(
-        "INSERT INTO usuarios (nome,email,senha,plano) VALUES (?,?,?,?)",
-        ("Administrador","admin@motorfinanceiro.com",senha_admin,"admin")
+        "INSERT INTO usuarios (nome,email,senha,plano,aprovado) VALUES (?,?,?,?,?)",
+        ("Administrador", admin_email, admin_senha, "admin", 1)
     )
     conn.commit()
 
-# =============================
-# FUNÇÕES
-# =============================
+# ==========================
+# FUNÇÃO PDF
+# ==========================
 
-def hash_senha(s):
-    return hashlib.sha256(s.encode()).hexdigest()
+def gerar_pdf(nome_empresa, dados):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.drawString(50, 800, f"Relatório Financeiro - {nome_empresa}")
+    y = 760
+    for linha in dados:
+        c.drawString(50, y, linha)
+        y -= 20
+    c.save()
+    buffer.seek(0)
+    return buffer
 
-def login(email, senha):
-    cursor.execute(
-        "SELECT * FROM usuarios WHERE email=? AND senha=?",
-        (email, hash_senha(senha))
-    )
-    return cursor.fetchone()
+# ==========================
+# SESSION
+# ==========================
 
-def cadastrar(nome,email,senha):
-    try:
-        cursor.execute(
-            "INSERT INTO usuarios (nome,email,senha,plano) VALUES (?,?,?,?)",
-            (nome,email,hash_senha(senha),"free")
-        )
-        conn.commit()
-        return True
-    except:
-        return False
+if "usuario" not in st.session_state:
+    st.session_state.usuario = None
 
-# =============================
-# CONTROLE PÁGINA
-# =============================
+# ==========================
+# LOGIN ADMIN (CANTO SUPERIOR)
+# ==========================
 
-if "pagina" not in st.session_state:
-    st.session_state.pagina = 1
-
-# =============================
-# BOTÃO ADMIN
-# =============================
-
-col1,col2 = st.columns([9,1])
-with col2:
-    if st.button("Admin"):
-        st.session_state.pagina="admin"
-
-# =============================
-# PÁGINA 1 - EMPRESA
-# =============================
-
-if st.session_state.pagina==1:
-    st.title("Cadastro Empresa")
-    nome_empresa=st.text_input("Nome Empresa")
-    if st.button("Próxima"):
-        st.session_state.nome_empresa=nome_empresa
-        st.session_state.pagina=2
-        st.rerun()
-
-# =============================
-# PÁGINA 2 - FINANCEIRO
-# =============================
-
-elif st.session_state.pagina==2:
-    st.title("Financeiro")
-    receita=st.number_input("Receita",0.0)
-    custos=st.number_input("Custos",0.0)
-    despesas=st.number_input("Despesas",0.0)
-    impostos=st.number_input("Impostos",0.0)
-
-    if st.button("Ir para Cadastro/Login"):
-        st.session_state.financeiro={
-            "receita":receita,
-            "custos":custos,
-            "despesas":despesas,
-            "impostos":impostos
-        }
-        st.session_state.pagina=3
-        st.rerun()
-
-# =============================
-# PÁGINA 3 - CADASTRO + LOGIN
-# =============================
-
-elif st.session_state.pagina==3:
-
-    st.title("Cadastro ou Login")
-
-    aba=st.radio("Escolha",["Cadastrar","Login"])
-
-    if aba=="Cadastrar":
-        nome=st.text_input("Nome")
-        email=st.text_input("Email")
-        senha=st.text_input("Senha",type="password")
-
-        if st.button("Criar Conta"):
-            if cadastrar(nome,email,senha):
-                st.success("Conta criada! Faça login.")
-            else:
-                st.error("Email já existe")
-
-    if aba=="Login":
-        email=st.text_input("Email")
-        senha=st.text_input("Senha",type="password")
-
-        if st.button("Entrar"):
-            usuario=login(email,senha)
-            if usuario:
-                st.session_state.usuario=usuario
-                st.session_state.pagina=4
-                st.rerun()
-            else:
-                st.error("Acesso negado")
-
-# =============================
-# PÁGINA 4 - RESULTADO
-# =============================
-
-elif st.session_state.pagina==4:
-
-    dados=st.session_state.financeiro
-    usuario=st.session_state.usuario
-
-    receita=dados["receita"]
-    lucro=receita-dados["custos"]-dados["despesas"]-dados["impostos"]
-
-    st.subheader("Resultado")
-    st.write("Receita:",receita)
-    st.write("Lucro:",lucro)
-
-    cursor.execute(
-        "INSERT INTO empresas (usuario_id,nome_empresa,receita,lucro,data) VALUES (?,?,?,?,?)",
-        (usuario[0],st.session_state.nome_empresa,receita,lucro,datetime.now().strftime("%d/%m/%Y"))
-    )
-    conn.commit()
-
-# =============================
-# PAINEL ADMIN
-# =============================
-
-elif st.session_state.pagina=="admin":
-
-    st.title("Painel Admin")
-
-    email=st.text_input("Email Admin")
-    senha=st.text_input("Senha Admin",type="password")
-
+with st.sidebar:
+    st.subheader("🔐 Login Admin")
+    admin_login = st.text_input("Email Admin")
+    admin_pass = st.text_input("Senha Admin", type="password")
     if st.button("Entrar Admin"):
-        usuario=login(email,senha)
-        if usuario and usuario[4]=="admin":
-            st.success("Admin logado")
-
-            st.subheader("Usuários")
-            st.dataframe(pd.read_sql_query("SELECT id,nome,email,plano FROM usuarios",conn))
-
-            st.subheader("Alterar Plano")
-            user_id=st.number_input("ID usuário",step=1)
-            plano=st.selectbox("Plano",["free","pago"])
-
-            if st.button("Atualizar"):
-                cursor.execute("UPDATE usuarios SET plano=? WHERE id=?",(plano,user_id))
-                conn.commit()
-                st.success("Plano atualizado")
-
+        cursor.execute("SELECT * FROM usuarios WHERE email=? AND senha=?",
+                       (admin_login, hash_senha(admin_pass)))
+        user = cursor.fetchone()
+        if user and user[4] == "admin":
+            st.session_state.usuario = user
         else:
             st.error("Acesso negado")
+
+# ==========================
+# PAINEL ADMIN
+# ==========================
+
+if st.session_state.usuario and st.session_state.usuario[4] == "admin":
+
+    st.title("👑 Painel Admin")
+
+    cursor.execute("SELECT id,nome,email,plano,aprovado FROM usuarios WHERE plano!='admin'")
+    usuarios = cursor.fetchall()
+
+    for u in usuarios:
+        st.write(f"**{u[1]}** | {u[2]} | Plano: {u[3]} | Aprovado: {u[4]}")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button(f"Aprovar {u[0]}"):
+                cursor.execute("UPDATE usuarios SET aprovado=1 WHERE id=?", (u[0],))
+                conn.commit()
+                st.rerun()
+
+        with col2:
+            if st.button(f"Tornar Premium {u[0]}"):
+                cursor.execute("UPDATE usuarios SET plano='premium' WHERE id=?", (u[0],))
+                conn.commit()
+                st.rerun()
+
+    st.stop()
+
+# ==========================
+# PÁGINA 1 - CADASTRO
+# ==========================
+
+st.title("🚀 Cadastro da Empresa")
+
+nome = st.text_input("Nome")
+email = st.text_input("Email")
+senha = st.text_input("Senha", type="password")
+
+if st.button("Cadastrar"):
+    try:
+        cursor.execute(
+            "INSERT INTO usuarios (nome,email,senha) VALUES (?,?,?)",
+            (nome, email, hash_senha(senha))
+        )
+        conn.commit()
+        st.success("Cadastro realizado! Aguarde aprovação do admin.")
+    except:
+        st.error("Email já cadastrado.")
+
+st.divider()
+
+# ==========================
+# PÁGINA 2 - LOGIN USUÁRIO
+# ==========================
+
+st.subheader("🔐 Login Usuário")
+
+login_email = st.text_input("Email Login")
+login_senha = st.text_input("Senha Login", type="password")
+
+if st.button("Entrar"):
+    cursor.execute("SELECT * FROM usuarios WHERE email=? AND senha=?",
+                   (login_email, hash_senha(login_senha)))
+    user = cursor.fetchone()
+    if user:
+        if user[5] == 0:
+            st.warning("Aguardando aprovação do administrador.")
+        else:
+            st.session_state.usuario = user
+            st.rerun()
+    else:
+        st.error("Login inválido")
+
+# ==========================
+# PÁGINA 3 - RESULTADOS
+# ==========================
+
+if st.session_state.usuario and st.session_state.usuario[4] != "admin":
+
+    usuario = st.session_state.usuario
+
+    st.title("📊 Simulador Financeiro")
+
+    receita = st.number_input("Receita Bruta")
+    custos = st.number_input("Custos")
+    despesas = st.number_input("Despesas")
+
+    if st.button("Calcular"):
+
+        lucro_bruto = receita - custos
+        lucro_liquido = lucro_bruto - despesas
+
+        margem = 0
+        if receita > 0:
+            margem = (lucro_liquido / receita) * 100
+
+        cursor.execute(
+            "INSERT INTO empresas (usuario_id,nome_empresa,receita,lucro,data) VALUES (?,?,?,?,?)",
+            (usuario[0], usuario[1], receita, lucro_liquido, str(datetime.now()))
+        )
+        conn.commit()
+
+        if usuario[4] == "free":
+            st.warning("Plano FREE — Faça upgrade para ver dashboard completo.")
+            st.write(f"Lucro Líquido: R$ {lucro_liquido}")
+            st.stop()
+
+        # DASHBOARD PREMIUM
+        st.subheader("📈 Dashboard Premium")
+
+        df = pd.DataFrame({
+            "Indicador": ["Receita", "Lucro Líquido"],
+            "Valor": [receita, lucro_liquido]
+        })
+
+        fig = px.bar(df, x="Indicador", y="Valor")
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.metric("Margem Líquida (%)", round(margem, 2))
+
+        relatorio = [
+            f"Receita: {receita}",
+            f"Lucro Líquido: {lucro_liquido}",
+            f"Margem: {round(margem,2)}%"
+        ]
+
+        pdf = gerar_pdf(usuario[1], relatorio)
+
+        st.download_button(
+            "📄 Baixar PDF",
+            pdf,
+            file_name="relatorio_financeiro.pdf"
+        )
+
+    st.divider()
+
+    st.subheader("📜 Histórico")
+
+    cursor.execute("SELECT nome_empresa,receita,lucro,data FROM empresas WHERE usuario_id=?",
+                   (usuario[0],))
+    historico = cursor.fetchall()
+
+    for h in historico:
+        st.write(f"{h[3]} | Receita: {h[1]} | Lucro: {h[2]}")

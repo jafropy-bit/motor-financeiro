@@ -3,68 +3,65 @@ import sqlite3
 import pandas as pd
 import hashlib
 import plotly.express as px
+import os
 
 st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
 # =========================
-# CONEXÃO BANCO
+# RESET AUTOMÁTICO DO BANCO (EVITA ERRO DE COLUNA)
+# =========================
+
+if not os.path.exists("sistema.db"):
+    conn = sqlite3.connect("sistema.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT,
+        email TEXT UNIQUE,
+        senha TEXT,
+        plano TEXT
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE empresas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER,
+        nome_empresa TEXT,
+        cnpj TEXT,
+        email TEXT,
+        telefone TEXT,
+        whatsapp TEXT,
+        cidade TEXT,
+        estado TEXT,
+        receita_bruta REAL,
+        deducoes REAL,
+        custos REAL,
+        despesas REAL,
+        depreciacao REAL,
+        resultado_financeiro REAL,
+        impostos REAL
+    )
+    """)
+
+    senha_admin = hashlib.sha256("admin123".encode()).hexdigest()
+
+    cursor.execute("""
+    INSERT INTO usuarios (nome, email, senha, plano)
+    VALUES (?, ?, ?, ?)
+    """, ("Administrador", "admin@motorfinanceiro.com", senha_admin, "admin"))
+
+    conn.commit()
+    conn.close()
+
+# =========================
+# CONEXÃO
 # =========================
 
 conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
-
-# =========================
-# CRIAÇÃO TABELAS
-# =========================
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT,
-    email TEXT UNIQUE,
-    senha TEXT,
-    plano TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS empresas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario_id INTEGER,
-    nome_empresa TEXT,
-    cnpj TEXT,
-    email TEXT,
-    telefone TEXT,
-    whatsapp TEXT,
-    cidade TEXT,
-    estado TEXT,
-    receita_bruta REAL,
-    deducoes REAL,
-    custos REAL,
-    despesas REAL,
-    depreciacao REAL,
-    resultado_financeiro REAL,
-    impostos REAL
-)
-""")
-
-conn.commit()
-
-# =========================
-# CRIA ADMIN AUTOMÁTICO
-# =========================
-
-senha_admin = hashlib.sha256("admin123".encode()).hexdigest()
-
-cursor.execute("SELECT * FROM usuarios WHERE email = ?", ("admin@motorfinanceiro.com",))
-admin_existe = cursor.fetchone()
-
-if not admin_existe:
-    cursor.execute(
-        "INSERT INTO usuarios (nome, email, senha, plano) VALUES (?, ?, ?, ?)",
-        ("Administrador", "admin@motorfinanceiro.com", senha_admin, "admin")
-    )
-    conn.commit()
 
 # =========================
 # FUNÇÕES
@@ -82,14 +79,14 @@ def login(email, senha):
     return cursor.fetchone()
 
 # =========================
-# NAVEGAÇÃO
+# CONTROLE DE PÁGINA
 # =========================
 
 if "pagina" not in st.session_state:
     st.session_state.pagina = 1
 
 # =========================
-# PÁGINA 1 – DADOS EMPRESA
+# 1ª PÁGINA – DADOS EMPRESA
 # =========================
 
 if st.session_state.pagina == 1:
@@ -104,7 +101,7 @@ if st.session_state.pagina == 1:
     cidade = st.text_input("Cidade")
     estado = st.text_input("Estado")
 
-    if st.button("Próxima Página"):
+    if st.button("Próxima"):
         st.session_state.dados_empresa = {
             "nome_empresa": nome_empresa,
             "cnpj": cnpj,
@@ -118,7 +115,7 @@ if st.session_state.pagina == 1:
         st.rerun()
 
 # =========================
-# PÁGINA 2 – DADOS FINANCEIROS
+# 2ª PÁGINA – DADOS FINANCEIROS
 # =========================
 
 elif st.session_state.pagina == 2:
@@ -147,12 +144,12 @@ elif st.session_state.pagina == 2:
         st.rerun()
 
 # =========================
-# PÁGINA 3 – LOGIN
+# 3ª PÁGINA – LOGIN
 # =========================
 
 elif st.session_state.pagina == 3:
 
-    st.title("Login")
+    st.title("Área Restrita")
 
     email = st.text_input("Email")
     senha = st.text_input("Senha", type="password")
@@ -168,7 +165,7 @@ elif st.session_state.pagina == 3:
             st.error("Login inválido")
 
 # =========================
-# PÁGINA 4 – RESULTADO DRE
+# 4ª PÁGINA – RESULTADO DRE
 # =========================
 
 elif st.session_state.pagina == 4:

@@ -1,163 +1,46 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-from fpdf import FPDF
+Chat, vamos mudar, quero que na 1° pagina colete as seguintes informações:
+Nome da empresa:
+Cnpj:
+Email:
+Telefone:
+Whatsapp:
+Cidade:
+Estado:
 
-st.set_page_config(page_title="Motor Financeiro", layout="wide")
+2° pagina colete informações financeiras:
 
-# ---------------------------
-# CONFIGURAÇÃO
-# ---------------------------
-VERSAO = "FREE"  # ALTERE PARA "PREMIUM" PARA LIBERAR TUDO
+(+) Receita Operacional Bruta
 
-# ---------------------------
-# SESSION STATE
-# ---------------------------
-if "logado" not in st.session_state:
-    st.session_state.logado = False
+ Deduções (Impostos s/ Vendas, Devoluções)
+(=) Receita Operacional Líquida
 
-if "empresa" not in st.session_state:
-    st.session_state.empresa = {}
+ Custos (CMV/CPV - Matéria-prima, Mão de obra direta)
+(=) Lucro Bruto
 
-# ---------------------------
-# LOGIN
-# ---------------------------
-if not st.session_state.logado:
+ Despesas Operacionais (SG&A: Administrativas, Comercial, Marketing)
+(=) EBITDA (Lucro Operacional antes de D&A)
 
-    st.title("🔐 Login - Motor Financeiro")
+ Depreciação e Amortização (Não impactam o caixa)
+(=) EBIT (Lucro Operacional Líquido)
 
-    email = st.text_input("Email")
-    senha = st.text_input("Senha", type="password")
+ Resultado Financeiro (Juros, Receitas Financeiras)
 
-    if st.button("Entrar"):
-        if email and senha:
-            st.session_state.logado = True
-            st.success("Login realizado com sucesso!")
-            st.rerun()
-        else:
-            st.error("Preencha email e senha.")
+ Resultado Antes dos Impostos (LAIR)
 
-    st.stop()
+ Imposto de Renda e Contribuição Social (IRPJ/CSLL)
+(=) Lucro/Prejuízo Líquido
 
-# ---------------------------
-# SIDEBAR - EMPRESA
-# ---------------------------
-st.sidebar.title("🏢 Dados da Empresa")
+Porem os resultados do DRE não fique nessa pagina.
 
-empresa_nome = st.sidebar.text_input("Nome da Empresa")
-cnpj = st.sidebar.text_input("CNPJ")
-setor = st.sidebar.selectbox(
-    "Setor",
-    ["Comércio", "Serviços", "Indústria", "Tecnologia"]
-)
+3° pagina:
 
-# ---------------------------
-# TÍTULO
-# ---------------------------
-st.title("📊 Motor Financeiro - Análise de DRE")
+Solicite Login e senha
 
-st.markdown(f"""
-**Empresa:** {empresa_nome if empresa_nome else "Não informada"}  
-**Setor:** {setor}
-""")
+Depois do login e senha entra na 
 
-st.divider()
+4° pagina que terá os resultados do DRE e:
+Margem EBITDA (%) = (EBITDA / Receita Líquida) * 100: Indica a eficiência na conversão de vendas em caixa operacional.
+Margem Bruta (%) = (Lucro Bruto / Receita Líquida) * 100: Mede a rentabilidade da produção ou serviço.
+Margem Líquida (%) = (Lucro Líquido / Receita Líquida) * 100: Mostra o resultado final.
 
-# ---------------------------
-# INPUT DRE
-# ---------------------------
-col1, col2 = st.columns(2)
-
-with col1:
-    receita = st.number_input("Receita Bruta", min_value=0.0)
-    impostos = st.number_input("Impostos", min_value=0.0)
-    custos = st.number_input("Custos", min_value=0.0)
-
-with col2:
-    despesas = st.number_input("Despesas Operacionais", min_value=0.0)
-    depreciacao = st.number_input("Depreciação", min_value=0.0)
-    juros = st.number_input("Juros", min_value=0.0)
-
-# ---------------------------
-# CÁLCULOS
-# ---------------------------
-if receita > 0:
-
-    ebitda = receita - impostos - custos - despesas
-    lucro_liquido = ebitda - depreciacao - juros
-
-    margem_ebitda = (ebitda / receita) * 100
-    margem_liquida = (lucro_liquido / receita) * 100
-
-    score = 0
-
-    if margem_ebitda > 20:
-        score += 40
-    elif margem_ebitda > 10:
-        score += 25
-    else:
-        score += 10
-
-    if margem_liquida > 10:
-        score += 60
-    elif margem_liquida > 5:
-        score += 40
-    else:
-        score += 20
-
-    st.divider()
-    st.subheader("📈 Resultado da Análise")
-
-    # ---------------- FREE ----------------
-    if VERSAO == "FREE":
-
-        st.metric("Margem EBITDA", f"{margem_ebitda:.2f}%")
-
-        st.warning("🔒 Sua margem está abaixo da média do mercado.")
-        st.info("Libere o Premium para visualizar Score completo, gráficos e relatório PDF.")
-
-    # ---------------- PREMIUM ----------------
-    if VERSAO == "PREMIUM":
-
-        col3, col4, col5 = st.columns(3)
-
-        col3.metric("Margem EBITDA", f"{margem_ebitda:.2f}%")
-        col4.metric("Margem Líquida", f"{margem_liquida:.2f}%")
-        col5.metric("Score Financeiro", f"{score}/100")
-
-        # DATAFRAME CORRETO (SEM ERRO DE CHAVE)
-        df = pd.DataFrame({
-            "Indicador": ["Receita", "EBITDA", "Lucro Líquido"],
-            "Valor": [receita, ebitda, lucro_liquido]
-        })
-
-        fig = px.bar(df, x="Indicador", y="Valor")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # ---------------- PDF ----------------
-        if st.button("📄 Gerar Relatório PDF"):
-
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", size=12)
-
-            pdf.cell(200, 10, "Relatório Financeiro", ln=True)
-            pdf.cell(200, 10, f"Empresa: {empresa_nome}", ln=True)
-            pdf.cell(200, 10, f"CNPJ: {cnpj}", ln=True)
-            pdf.cell(200, 10, f"Setor: {setor}", ln=True)
-            pdf.cell(200, 10, f"Margem EBITDA: {margem_ebitda:.2f}%", ln=True)
-            pdf.cell(200, 10, f"Margem Líquida: {margem_liquida:.2f}%", ln=True)
-            pdf.cell(200, 10, f"Score: {score}/100", ln=True)
-
-            pdf.output("relatorio.pdf")
-
-            with open("relatorio.pdf", "rb") as file:
-                st.download_button(
-                    label="Baixar PDF",
-                    data=file,
-                    file_name="relatorio_financeiro.pdf",
-                    mime="application/pdf"
-                )
-
-else:
-    st.info("Insira a Receita para iniciar a análise.")
+Com graficos e relatório 

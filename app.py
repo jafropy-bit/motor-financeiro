@@ -83,8 +83,9 @@ elif st.session_state.pagina == 3:
 
     st.title("🔐 Acesso aos Resultados")
 
-    email = st.text_input("Email")
-    senha = st.text_input("Senha", type="password")
+    EMAIL_CORRETO = "admin@motorfinanceiro.com"
+SENHA_CORRETA = "123456"
+
 
     if st.button("Entrar"):
         if email and senha:
@@ -155,3 +156,4 @@ elif st.session_state.pagina == 4 and st.session_state.logado:
                 file_name="relatorio_dre.pdf",
                 mime="application/pdf"
             )
+

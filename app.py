@@ -3,13 +3,22 @@ import sqlite3
 import pandas as pd
 import hashlib
 import plotly.express as px
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import Table
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import TableStyle
 import os
+from datetime import datetime
 
 st.set_page_config(page_title="Motor Financeiro", layout="wide")
 
-# =========================
-# RESET AUTOMÁTICO DO BANCO (EVITA ERRO DE COLUNA)
-# =========================
+# =============================
+# CRIA BANCO SE NÃO EXISTIR
+# =============================
 
 if not os.path.exists("sistema.db"):
     conn = sqlite3.connect("sistema.db")
@@ -31,18 +40,11 @@ if not os.path.exists("sistema.db"):
         usuario_id INTEGER,
         nome_empresa TEXT,
         cnpj TEXT,
-        email TEXT,
-        telefone TEXT,
-        whatsapp TEXT,
         cidade TEXT,
         estado TEXT,
         receita_bruta REAL,
-        deducoes REAL,
-        custos REAL,
-        despesas REAL,
-        depreciacao REAL,
-        resultado_financeiro REAL,
-        impostos REAL
+        lucro_liquido REAL,
+        data TEXT
     )
     """)
 
@@ -56,38 +58,64 @@ if not os.path.exists("sistema.db"):
     conn.commit()
     conn.close()
 
-# =========================
-# CONEXÃO
-# =========================
-
 conn = sqlite3.connect("sistema.db", check_same_thread=False)
 cursor = conn.cursor()
 
-# =========================
+# =============================
 # FUNÇÕES
-# =========================
+# =============================
 
 def hash_senha(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
 
 def login(email, senha):
-    senha_hash = hash_senha(senha)
     cursor.execute(
         "SELECT * FROM usuarios WHERE email = ? AND senha = ?",
-        (email, senha_hash)
+        (email, hash_senha(senha))
     )
     return cursor.fetchone()
 
-# =========================
+def gerar_pdf(nome_empresa, df):
+    nome_arquivo = f"relatorio_{nome_empresa}.pdf"
+    doc = SimpleDocTemplate(nome_arquivo, pagesize=A4)
+    elements = []
+
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph(f"Relatório DRE - {nome_empresa}", styles['Title']))
+    elements.append(Spacer(1, 0.5 * inch))
+
+    data = [df.columns.tolist()] + df.values.tolist()
+    tabela = Table(data)
+    tabela.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.grey),
+        ('GRID', (0,0), (-1,-1), 1, colors.black)
+    ]))
+
+    elements.append(tabela)
+    doc.build(elements)
+
+    return nome_arquivo
+
+# =============================
 # CONTROLE DE PÁGINA
-# =========================
+# =============================
 
 if "pagina" not in st.session_state:
     st.session_state.pagina = 1
 
-# =========================
-# 1ª PÁGINA – DADOS EMPRESA
-# =========================
+# =============================
+# LOGIN ADMIN PEQUENO (CANTO)
+# =============================
+
+col1, col2 = st.columns([8,2])
+
+with col2:
+    if st.button("Admin"):
+        st.session_state.pagina = "admin"
+
+# =============================
+# PÁGINA 1 - EMPRESA
+# =============================
 
 if st.session_state.pagina == 1:
 
@@ -95,105 +123,141 @@ if st.session_state.pagina == 1:
 
     nome_empresa = st.text_input("Nome da empresa")
     cnpj = st.text_input("CNPJ")
-    email_empresa = st.text_input("Email")
-    telefone = st.text_input("Telefone")
-    whatsapp = st.text_input("Whatsapp")
     cidade = st.text_input("Cidade")
     estado = st.text_input("Estado")
 
     if st.button("Próxima"):
-        st.session_state.dados_empresa = {
+        st.session_state.empresa = {
             "nome_empresa": nome_empresa,
             "cnpj": cnpj,
-            "email": email_empresa,
-            "telefone": telefone,
-            "whatsapp": whatsapp,
             "cidade": cidade,
             "estado": estado
         }
         st.session_state.pagina = 2
         st.rerun()
 
-# =========================
-# 2ª PÁGINA – DADOS FINANCEIROS
-# =========================
+# =============================
+# PÁGINA 2 - FINANCEIRO
+# =============================
 
 elif st.session_state.pagina == 2:
 
     st.title("Informações Financeiras")
 
-    receita_bruta = st.number_input("Receita Operacional Bruta", value=0.0)
-    deducoes = st.number_input("Deduções", value=0.0)
-    custos = st.number_input("Custos (CMV/CPV)", value=0.0)
-    despesas = st.number_input("Despesas Operacionais", value=0.0)
-    depreciacao = st.number_input("Depreciação e Amortização", value=0.0)
-    resultado_financeiro = st.number_input("Resultado Financeiro", value=0.0)
-    impostos = st.number_input("IRPJ / CSLL", value=0.0)
+    receita = st.number_input("Receita Bruta", value=0.0)
+    custos = st.number_input("Custos", value=0.0)
+    despesas = st.number_input("Despesas", value=0.0)
+    impostos = st.number_input("Impostos", value=0.0)
 
     if st.button("Ir para Login"):
-        st.session_state.dados_financeiros = {
-            "receita_bruta": receita_bruta,
-            "deducoes": deducoes,
+        st.session_state.financeiro = {
+            "receita": receita,
             "custos": custos,
             "despesas": despesas,
-            "depreciacao": depreciacao,
-            "resultado_financeiro": resultado_financeiro,
             "impostos": impostos
         }
         st.session_state.pagina = 3
         st.rerun()
 
-# =========================
-# 3ª PÁGINA – LOGIN
-# =========================
+# =============================
+# PÁGINA 3 - LOGIN CLIENTE
+# =============================
 
 elif st.session_state.pagina == 3:
 
-    st.title("Área Restrita")
+    st.title("Login para visualizar resultado")
 
     email = st.text_input("Email")
     senha = st.text_input("Senha", type="password")
 
     if st.button("Entrar"):
         usuario = login(email, senha)
-
         if usuario:
             st.session_state.usuario = usuario
             st.session_state.pagina = 4
             st.rerun()
         else:
-            st.error("Login inválido")
+            st.error("Usuário não autorizado")
 
-# =========================
-# 4ª PÁGINA – RESULTADO DRE
-# =========================
+# =============================
+# PÁGINA 4 - RESULTADO + HISTÓRICO
+# =============================
 
 elif st.session_state.pagina == 4:
 
-    st.title("Resultado DRE")
+    dados = st.session_state.financeiro
+    empresa = st.session_state.empresa
 
-    dados = st.session_state.dados_financeiros
+    receita_liquida = dados["receita"]
+    lucro_liquido = receita_liquida - dados["custos"] - dados["despesas"] - dados["impostos"]
 
-    receita_liquida = dados["receita_bruta"] - dados["deducoes"]
-    lucro_bruto = receita_liquida - dados["custos"]
-    ebitda = lucro_bruto - dados["despesas"]
-    ebit = ebitda - dados["depreciacao"]
-    lair = ebit + dados["resultado_financeiro"]
-    lucro_liquido = lair - dados["impostos"]
-
-    margem_ebitda = (ebitda / receita_liquida * 100) if receita_liquida != 0 else 0
-    margem_bruta = (lucro_bruto / receita_liquida * 100) if receita_liquida != 0 else 0
-    margem_liquida = (lucro_liquido / receita_liquida * 100) if receita_liquida != 0 else 0
+    margem = (lucro_liquido / receita_liquida * 100) if receita_liquida else 0
 
     df = pd.DataFrame({
-        "Indicador": ["Margem EBITDA", "Margem Bruta", "Margem Líquida"],
-        "Valor (%)": [margem_ebitda, margem_bruta, margem_liquida]
+        "Indicador": ["Receita", "Lucro Líquido", "Margem (%)"],
+        "Valor": [receita_liquida, lucro_liquido, margem]
     })
 
-    st.subheader("Margens")
     st.dataframe(df)
 
-    fig = px.bar(df, x="Indicador", y="Valor (%)")
+    fig = px.bar(df, x="Indicador", y="Valor")
     st.plotly_chart(fig, use_container_width=True)
 
-    st.success("Análise concluída com sucesso!")
+    # SALVA HISTÓRICO
+    cursor.execute("""
+    INSERT INTO empresas (usuario_id, nome_empresa, cnpj, cidade, estado, receita_bruta, lucro_liquido, data)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        st.session_state.usuario[0],
+        empresa["nome_empresa"],
+        empresa["cnpj"],
+        empresa["cidade"],
+        empresa["estado"],
+        receita_liquida,
+        lucro_liquido,
+        datetime.now().strftime("%d/%m/%Y")
+    ))
+
+    conn.commit()
+
+    # GERAR PDF
+    if st.button("Gerar Relatório PDF"):
+        arquivo = gerar_pdf(empresa["nome_empresa"], df)
+        with open(arquivo, "rb") as f:
+            st.download_button("Baixar PDF", f, file_name=arquivo)
+
+# =============================
+# PAINEL ADMIN
+# =============================
+
+elif st.session_state.pagina == "admin":
+
+    st.title("Painel Administrativo")
+
+    email = st.text_input("Email Admin")
+    senha = st.text_input("Senha Admin", type="password")
+
+    if st.button("Entrar Admin"):
+        usuario = login(email, senha)
+        if usuario and usuario[4] == "admin":
+            st.success("Bem-vindo Admin")
+
+            st.subheader("Usuários Cadastrados")
+            usuarios = pd.read_sql_query("SELECT id, nome, email, plano FROM usuarios", conn)
+            st.dataframe(usuarios)
+
+            st.subheader("Histórico de Empresas")
+            empresas = pd.read_sql_query("SELECT * FROM empresas", conn)
+            st.dataframe(empresas)
+
+            st.subheader("Alterar Plano de Usuário")
+            user_id = st.number_input("ID do usuário", step=1)
+            novo_plano = st.selectbox("Plano", ["free", "pago"])
+
+            if st.button("Atualizar Plano"):
+                cursor.execute("UPDATE usuarios SET plano = ? WHERE id = ?", (novo_plano, user_id))
+                conn.commit()
+                st.success("Plano atualizado")
+
+        else:
+            st.error("Acesso negado")

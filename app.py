@@ -2,158 +2,171 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from fpdf import FPDF
+import sqlite3
+import hashlib
 
-st.set_page_config(page_title="Motor Financeiro", layout="wide")
+st.set_page_config(page_title="Motor Financeiro SaaS", layout="wide")
 
-# ---------------------------
-# SESSION STATE
-# ---------------------------
-if "pagina" not in st.session_state:
-    st.session_state.pagina = 1
+# ------------------------
+# DATABASE
+# ------------------------
+conn = sqlite3.connect("usuarios.db", check_same_thread=False)
+cursor = conn.cursor()
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT,
+    email TEXT UNIQUE,
+    senha TEXT,
+    plano TEXT
+)
+""")
+conn.commit()
+
+# ------------------------
+# FUNÇÕES
+# ------------------------
+def hash_senha(senha):
+    return hashlib.sha256(senha.encode()).hexdigest()
+
+def criar_usuario(nome, email, senha):
+    try:
+        cursor.execute(
+            "INSERT INTO usuarios (nome, email, senha, plano) VALUES (?, ?, ?, ?)",
+            (nome, email, hash_senha(senha), "free")
+        )
+        conn.commit()
+        return True
+    except:
+        return False
+
+def autenticar(email, senha):
+    cursor.execute(
+        "SELECT * FROM usuarios WHERE email=? AND senha=?",
+        (email, hash_senha(senha))
+    )
+    return cursor.fetchone()
+
+# ------------------------
+# SESSION
+# ------------------------
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
-if "empresa" not in st.session_state:
-    st.session_state.empresa = {}
+if "usuario" not in st.session_state:
+    st.session_state.usuario = None
 
-if "dre" not in st.session_state:
-    st.session_state.dre = {}
+if "pagina" not in st.session_state:
+    st.session_state.pagina = "login"
 
-# ===========================
-# PÁGINA 1 - DADOS EMPRESA
-# ===========================
-if st.session_state.pagina == 1:
+# =========================
+# CADASTRO
+# =========================
+if st.session_state.pagina == "cadastro":
 
-    st.title("🏢 Cadastro da Empresa")
+    st.title("📝 Criar Conta")
 
-    nome = st.text_input("Nome da empresa")
-    cnpj = st.text_input("CNPJ")
+    nome = st.text_input("Nome")
     email = st.text_input("Email")
-    telefone = st.text_input("Telefone")
-    whatsapp = st.text_input("Whatsapp")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Cadastrar"):
+        if criar_usuario(nome, email, senha):
+            st.success("Conta criada com sucesso!")
+            st.session_state.pagina = "login"
+            st.rerun()
+        else:
+            st.error("Email já cadastrado.")
+
+    if st.button("Voltar para Login"):
+        st.session_state.pagina = "login"
+        st.rerun()
+
+# =========================
+# LOGIN
+# =========================
+elif st.session_state.pagina == "login":
+
+    st.title("🔐 Login")
+
+    email = st.text_input("Email")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        usuario = autenticar(email, senha)
+        if usuario:
+            st.session_state.logado = True
+            st.session_state.usuario = usuario
+            st.session_state.pagina = "empresa"
+            st.rerun()
+        else:
+            st.error("Email ou senha inválidos.")
+
+    if st.button("Criar Conta"):
+        st.session_state.pagina = "cadastro"
+        st.rerun()
+
+# =========================
+# PÁGINA EMPRESA
+# =========================
+elif st.session_state.pagina == "empresa" and st.session_state.logado:
+
+    st.title("🏢 Dados da Empresa")
+
+    nome_empresa = st.text_input("Nome da empresa")
+    cnpj = st.text_input("CNPJ")
     cidade = st.text_input("Cidade")
     estado = st.text_input("Estado")
 
-    if st.button("Próxima Página"):
-        st.session_state.empresa = {
-            "nome": nome,
-            "cnpj": cnpj,
-            "email": email,
-            "telefone": telefone,
-            "whatsapp": whatsapp,
-            "cidade": cidade,
-            "estado": estado,
-        }
-        st.session_state.pagina = 2
+    if st.button("Próxima"):
+        st.session_state.pagina = "dre"
+        st.session_state.empresa = nome_empresa
         st.rerun()
 
-# ===========================
-# PÁGINA 2 - DRE
-# ===========================
-elif st.session_state.pagina == 2:
+# =========================
+# PÁGINA DRE
+# =========================
+elif st.session_state.pagina == "dre":
 
-    st.title("📊 Demonstração de Resultado do Exercício")
+    st.title("📊 Inserir Dados da DRE")
 
-    receita_bruta = st.number_input("Receita Operacional Bruta", min_value=0.0)
-    deducoes = st.number_input("Deduções (Impostos / Devoluções)", min_value=0.0)
-    custos = st.number_input("Custos (CMV/CPV)", min_value=0.0)
-    despesas = st.number_input("Despesas Operacionais (SG&A)", min_value=0.0)
-    depreciacao = st.number_input("Depreciação e Amortização", min_value=0.0)
-    resultado_financeiro = st.number_input("Resultado Financeiro", value=0.0)
-    impostos = st.number_input("IRPJ / CSLL", min_value=0.0)
+    receita = st.number_input("Receita Bruta", min_value=0.0)
+    custos = st.number_input("Custos", min_value=0.0)
+    despesas = st.number_input("Despesas", min_value=0.0)
 
-    if st.button("Continuar para Login"):
-        st.session_state.dre = {
-            "receita_bruta": receita_bruta,
-            "deducoes": deducoes,
-            "custos": custos,
-            "despesas": despesas,
-            "depreciacao": depreciacao,
-            "resultado_financeiro": resultado_financeiro,
-            "impostos": impostos,
-        }
-        st.session_state.pagina = 3
+    if st.button("Ver Resultado"):
+        st.session_state.receita = receita
+        st.session_state.custos = custos
+        st.session_state.despesas = despesas
+        st.session_state.pagina = "resultado"
         st.rerun()
 
-# ===========================
-# PÁGINA 3 - LOGIN
-# ===========================
-elif st.session_state.pagina == 3:
+# =========================
+# RESULTADO
+# =========================
+elif st.session_state.pagina == "resultado":
 
-    st.title("🔐 Acesso aos Resultados")
+    st.title("📈 Resultado Financeiro")
 
-    EMAIL_CORRETO = "admin@motorfinanceiro.com"
-SENHA_CORRETA = "123456"
+    receita = st.session_state.receita
+    custos = st.session_state.custos
+    despesas = st.session_state.despesas
 
+    lucro = receita - custos - despesas
+    margem = (lucro / receita) * 100 if receita > 0 else 0
 
-    if st.button("Entrar"):
-        if email and senha:
-            st.session_state.logado = True
-            st.session_state.pagina = 4
-            st.rerun()
-        else:
-            st.error("Preencha email e senha.")
+    st.metric("Lucro", f"R$ {lucro:,.2f}")
+    st.metric("Margem (%)", f"{margem:.2f}%")
 
-# ===========================
-# PÁGINA 4 - RESULTADOS
-# ===========================
-elif st.session_state.pagina == 4 and st.session_state.logado:
-
-    st.title("📈 Resultado da Análise DRE")
-
-    dre = st.session_state.dre
-
-    receita_liquida = dre["receita_bruta"] - dre["deducoes"]
-    lucro_bruto = receita_liquida - dre["custos"]
-    ebitda = lucro_bruto - dre["despesas"]
-    ebit = ebitda - dre["depreciacao"]
-    lair = ebit + dre["resultado_financeiro"]
-    lucro_liquido = lair - dre["impostos"]
-
-    margem_ebitda = (ebitda / receita_liquida) * 100 if receita_liquida > 0 else 0
-    margem_bruta = (lucro_bruto / receita_liquida) * 100 if receita_liquida > 0 else 0
-    margem_liquida = (lucro_liquido / receita_liquida) * 100 if receita_liquida > 0 else 0
-
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Margem EBITDA (%)", f"{margem_ebitda:.2f}%")
-    col2.metric("Margem Bruta (%)", f"{margem_bruta:.2f}%")
-    col3.metric("Margem Líquida (%)", f"{margem_liquida:.2f}%")
-
-    # ---------------- GRÁFICO ----------------
     df = pd.DataFrame({
-        "Indicador": ["Receita Líquida", "Lucro Bruto", "EBITDA", "Lucro Líquido"],
-        "Valor": [receita_liquida, lucro_bruto, ebitda, lucro_liquido]
+        "Indicador": ["Receita", "Custos", "Despesas", "Lucro"],
+        "Valor": [receita, custos, despesas, lucro]
     })
 
     fig = px.bar(df, x="Indicador", y="Valor")
     st.plotly_chart(fig, use_container_width=True)
 
-    # ---------------- PDF ----------------
-    if st.button("📄 Gerar Relatório PDF"):
-
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", size=11)
-
-        pdf.cell(200, 8, "Relatório Financeiro - DRE", ln=True)
-        pdf.cell(200, 8, f"Empresa: {st.session_state.empresa['nome']}", ln=True)
-        pdf.cell(200, 8, f"Receita Liquida: {receita_liquida:.2f}", ln=True)
-        pdf.cell(200, 8, f"Lucro Bruto: {lucro_bruto:.2f}", ln=True)
-        pdf.cell(200, 8, f"EBITDA: {ebitda:.2f}", ln=True)
-        pdf.cell(200, 8, f"Lucro Liquido: {lucro_liquido:.2f}", ln=True)
-        pdf.cell(200, 8, f"Margem EBITDA: {margem_ebitda:.2f}%", ln=True)
-        pdf.cell(200, 8, f"Margem Bruta: {margem_bruta:.2f}%", ln=True)
-        pdf.cell(200, 8, f"Margem Liquida: {margem_liquida:.2f}%", ln=True)
-
-        pdf.output("relatorio_dre.pdf")
-
-        with open("relatorio_dre.pdf", "rb") as file:
-            st.download_button(
-                label="Baixar PDF",
-                data=file,
-                file_name="relatorio_dre.pdf",
-                mime="application/pdf"
-            )
-
+    if st.button("Logout"):
+        st.session_state.clear()
+        st.rerun()

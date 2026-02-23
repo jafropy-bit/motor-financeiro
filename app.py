@@ -3,20 +3,13 @@ import sqlite3
 import hashlib
 import pandas as pd
 import plotly.express as px
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-import io
 from datetime import datetime
-
-# ==========================
-# CONFIG
-# ==========================
 
 st.set_page_config(page_title="Motor Financeiro SaaS", layout="wide")
 
-# ==========================
-# BANCO DE DADOS
-# ==========================
+# ===============================
+# BANCO
+# ===============================
 
 conn = sqlite3.connect("motor_financeiro.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -35,218 +28,209 @@ CREATE TABLE IF NOT EXISTS usuarios (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS empresas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    usuario_id INTEGER,
+    usuario_email TEXT,
     nome_empresa TEXT,
     cnpj TEXT,
-    receita REAL,
-    lucro REAL,
+    telefone TEXT,
+    whatsapp TEXT,
+    cidade TEXT,
+    estado TEXT,
+    receita_bruta REAL,
+    deducoes REAL,
+    custos REAL,
+    despesas REAL,
+    depreciacao REAL,
+    resultado_financeiro REAL,
+    impostos REAL,
     data TEXT
 )
 """)
 
 conn.commit()
 
-# ==========================
-# CRIAR ADMIN AUTOMÁTICO
-# ==========================
+# ===============================
+# FUNÇÕES
+# ===============================
 
 def hash_senha(senha):
     return hashlib.sha256(senha.encode()).hexdigest()
 
-admin_email = "admin@motorfinanceiro.com"
-admin_senha = hash_senha("123456")
-
-cursor.execute("SELECT * FROM usuarios WHERE email=?", (admin_email,))
-if not cursor.fetchone():
-    cursor.execute(
-        "INSERT INTO usuarios (nome,email,senha,plano,aprovado) VALUES (?,?,?,?,?)",
-        ("Administrador", admin_email, admin_senha, "admin", 1)
-    )
-    conn.commit()
-
-# ==========================
-# FUNÇÃO PDF
-# ==========================
-
-def gerar_pdf(nome_empresa, dados):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    c.drawString(50, 800, f"Relatório Financeiro - {nome_empresa}")
-    y = 760
-    for linha in dados:
-        c.drawString(50, y, linha)
-        y -= 20
-    c.save()
-    buffer.seek(0)
-    return buffer
-
-# ==========================
+# ===============================
 # SESSION
-# ==========================
+# ===============================
+
+if "etapa" not in st.session_state:
+    st.session_state.etapa = 1
+
+if "dados_empresa" not in st.session_state:
+    st.session_state.dados_empresa = {}
+
+if "dados_financeiros" not in st.session_state:
+    st.session_state.dados_financeiros = {}
 
 if "usuario" not in st.session_state:
     st.session_state.usuario = None
 
-# ==========================
-# LOGIN ADMIN (CANTO SUPERIOR)
-# ==========================
+# ===============================
+# PAGINA 1 - DADOS EMPRESA
+# ===============================
 
-with st.sidebar:
-    st.subheader("🔐 Login Admin")
-    admin_login = st.text_input("Email Admin")
-    admin_pass = st.text_input("Senha Admin", type="password")
-    if st.button("Entrar Admin"):
+if st.session_state.etapa == 1:
+
+    st.title("📋 Cadastro da Empresa")
+
+    nome_empresa = st.text_input("Nome da Empresa")
+    cnpj = st.text_input("CNPJ")
+    email = st.text_input("Email")
+    telefone = st.text_input("Telefone")
+    whatsapp = st.text_input("Whatsapp")
+    cidade = st.text_input("Cidade")
+    estado = st.text_input("Estado")
+
+    if st.button("Próximo"):
+        st.session_state.dados_empresa = {
+            "nome_empresa": nome_empresa,
+            "cnpj": cnpj,
+            "email": email,
+            "telefone": telefone,
+            "whatsapp": whatsapp,
+            "cidade": cidade,
+            "estado": estado
+        }
+        st.session_state.etapa = 2
+        st.rerun()
+
+# ===============================
+# PAGINA 2 - DRE
+# ===============================
+
+elif st.session_state.etapa == 2:
+
+    st.title("📊 Informações Financeiras - DRE")
+
+    receita_bruta = st.number_input("(+) Receita Operacional Bruta", min_value=0.0)
+    deducoes = st.number_input("(-) Deduções (Impostos s/ vendas, devoluções)", min_value=0.0)
+
+    custos = st.number_input("(-) Custos (CMV/CPV)", min_value=0.0)
+    despesas = st.number_input("(-) Despesas Operacionais (SG&A)", min_value=0.0)
+    depreciacao = st.number_input("(-) Depreciação e Amortização", min_value=0.0)
+    resultado_financeiro = st.number_input("(+) / (-) Resultado Financeiro", value=0.0)
+    impostos = st.number_input("(-) IRPJ / CSLL", min_value=0.0)
+
+    if st.button("Ir para Login"):
+        st.session_state.dados_financeiros = {
+            "receita_bruta": receita_bruta,
+            "deducoes": deducoes,
+            "custos": custos,
+            "despesas": despesas,
+            "depreciacao": depreciacao,
+            "resultado_financeiro": resultado_financeiro,
+            "impostos": impostos
+        }
+        st.session_state.etapa = 3
+        st.rerun()
+
+# ===============================
+# PAGINA 3 - LOGIN
+# ===============================
+
+elif st.session_state.etapa == 3:
+
+    st.title("🔐 Login para Visualizar Resultados")
+
+    email_login = st.text_input("Email")
+    senha_login = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
         cursor.execute("SELECT * FROM usuarios WHERE email=? AND senha=?",
-                       (admin_login, hash_senha(admin_pass)))
+                       (email_login, hash_senha(senha_login)))
         user = cursor.fetchone()
-        if user and user[4] == "admin":
-            st.session_state.usuario = user
-        else:
-            st.error("Acesso negado")
 
-# ==========================
-# PAINEL ADMIN
-# ==========================
-
-if st.session_state.usuario and st.session_state.usuario[4] == "admin":
-
-    st.title("👑 Painel Admin")
-
-    cursor.execute("SELECT id,nome,email,plano,aprovado FROM usuarios WHERE plano!='admin'")
-    usuarios = cursor.fetchall()
-
-    for u in usuarios:
-        st.write(f"**{u[1]}** | {u[2]} | Plano: {u[3]} | Aprovado: {u[4]}")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            if st.button(f"Aprovar {u[0]}"):
-                cursor.execute("UPDATE usuarios SET aprovado=1 WHERE id=?", (u[0],))
-                conn.commit()
+        if user:
+            if user[5] == 0:
+                st.warning("Usuário aguardando aprovação do administrador.")
+            else:
+                st.session_state.usuario = user
+                st.session_state.etapa = 4
                 st.rerun()
-
-        with col2:
-            if st.button(f"Tornar Premium {u[0]}"):
-                cursor.execute("UPDATE usuarios SET plano='premium' WHERE id=?", (u[0],))
-                conn.commit()
-                st.rerun()
-
-    st.stop()
-
-# ==========================
-# PÁGINA 1 - CADASTRO
-# ==========================
-
-st.title("🚀 Cadastro da Empresa")
-
-nome = st.text_input("Nome")
-email = st.text_input("Email")
-senha = st.text_input("Senha", type="password")
-
-if st.button("Cadastrar"):
-    try:
-        cursor.execute(
-            "INSERT INTO usuarios (nome,email,senha) VALUES (?,?,?)",
-            (nome, email, hash_senha(senha))
-        )
-        conn.commit()
-        st.success("Cadastro realizado! Aguarde aprovação do admin.")
-    except:
-        st.error("Email já cadastrado.")
-
-st.divider()
-
-# ==========================
-# PÁGINA 2 - LOGIN USUÁRIO
-# ==========================
-
-st.subheader("🔐 Login Usuário")
-
-login_email = st.text_input("Email Login")
-login_senha = st.text_input("Senha Login", type="password")
-
-if st.button("Entrar"):
-    cursor.execute("SELECT * FROM usuarios WHERE email=? AND senha=?",
-                   (login_email, hash_senha(login_senha)))
-    user = cursor.fetchone()
-    if user:
-        if user[5] == 0:
-            st.warning("Aguardando aprovação do administrador.")
         else:
-            st.session_state.usuario = user
-            st.rerun()
-    else:
-        st.error("Login inválido")
+            st.error("Login inválido")
 
-# ==========================
-# PÁGINA 3 - RESULTADOS
-# ==========================
+# ===============================
+# PAGINA 4 - RESULTADOS
+# ===============================
 
-if st.session_state.usuario and st.session_state.usuario[4] != "admin":
+elif st.session_state.etapa == 4:
 
-    usuario = st.session_state.usuario
+    st.title("📈 Resultado do DRE")
 
-    st.title("📊 Simulador Financeiro")
+    empresa = st.session_state.dados_empresa
+    financeiro = st.session_state.dados_financeiros
 
-    receita = st.number_input("Receita Bruta")
-    custos = st.number_input("Custos")
-    despesas = st.number_input("Despesas")
+    # ===============================
+    # CÁLCULOS DRE
+    # ===============================
 
-    if st.button("Calcular"):
+    receita_liquida = financeiro["receita_bruta"] - financeiro["deducoes"]
+    lucro_bruto = receita_liquida - financeiro["custos"]
+    ebitda = lucro_bruto - financeiro["despesas"]
+    ebit = ebitda - financeiro["depreciacao"]
+    lair = ebit + financeiro["resultado_financeiro"]
+    lucro_liquido = lair - financeiro["impostos"]
 
-        lucro_bruto = receita - custos
-        lucro_liquido = lucro_bruto - despesas
+    margem_ebitda = (ebitda / receita_liquida * 100) if receita_liquida else 0
+    margem_bruta = (lucro_bruto / receita_liquida * 100) if receita_liquida else 0
+    margem_liquida = (lucro_liquido / receita_liquida * 100) if receita_liquida else 0
 
-        margem = 0
-        if receita > 0:
-            margem = (lucro_liquido / receita) * 100
+    # ===============================
+    # SALVAR NO BANCO
+    # ===============================
 
-        cursor.execute(
-            "INSERT INTO empresas (usuario_id,nome_empresa,receita,lucro,data) VALUES (?,?,?,?,?)",
-            (usuario[0], usuario[1], receita, lucro_liquido, str(datetime.now()))
-        )
-        conn.commit()
+    cursor.execute("""
+    INSERT INTO empresas (
+    usuario_email,nome_empresa,cnpj,telefone,whatsapp,cidade,estado,
+    receita_bruta,deducoes,custos,despesas,depreciacao,
+    resultado_financeiro,impostos,data)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """,
+    (
+        empresa["email"],
+        empresa["nome_empresa"],
+        empresa["cnpj"],
+        empresa["telefone"],
+        empresa["whatsapp"],
+        empresa["cidade"],
+        empresa["estado"],
+        financeiro["receita_bruta"],
+        financeiro["deducoes"],
+        financeiro["custos"],
+        financeiro["despesas"],
+        financeiro["depreciacao"],
+        financeiro["resultado_financeiro"],
+        financeiro["impostos"],
+        str(datetime.now())
+    ))
 
-        if usuario[4] == "free":
-            st.warning("Plano FREE — Faça upgrade para ver dashboard completo.")
-            st.write(f"Lucro Líquido: R$ {lucro_liquido}")
-            st.stop()
+    conn.commit()
 
-        # DASHBOARD PREMIUM
-        st.subheader("📈 Dashboard Premium")
+    # ===============================
+    # EXIBIÇÃO
+    # ===============================
 
-        df = pd.DataFrame({
-            "Indicador": ["Receita", "Lucro Líquido"],
-            "Valor": [receita, lucro_liquido]
-        })
+    st.subheader("📊 Indicadores")
 
-        fig = px.bar(df, x="Indicador", y="Valor")
-        st.plotly_chart(fig, use_container_width=True)
+    col1, col2, col3 = st.columns(3)
 
-        st.metric("Margem Líquida (%)", round(margem, 2))
+    col1.metric("Margem EBITDA (%)", round(margem_ebitda, 2))
+    col2.metric("Margem Bruta (%)", round(margem_bruta, 2))
+    col3.metric("Margem Líquida (%)", round(margem_liquida, 2))
 
-        relatorio = [
-            f"Receita: {receita}",
-            f"Lucro Líquido: {lucro_liquido}",
-            f"Margem: {round(margem,2)}%"
-        ]
+    df = pd.DataFrame({
+        "Indicador": ["Receita Líquida", "Lucro Bruto", "EBITDA", "Lucro Líquido"],
+        "Valor": [receita_liquida, lucro_bruto, ebitda, lucro_liquido]
+    })
 
-        pdf = gerar_pdf(usuario[1], relatorio)
+    fig = px.bar(df, x="Indicador", y="Valor")
+    st.plotly_chart(fig, use_container_width=True)
 
-        st.download_button(
-            "📄 Baixar PDF",
-            pdf,
-            file_name="relatorio_financeiro.pdf"
-        )
-
-    st.divider()
-
-    st.subheader("📜 Histórico")
-
-    cursor.execute("SELECT nome_empresa,receita,lucro,data FROM empresas WHERE usuario_id=?",
-                   (usuario[0],))
-    historico = cursor.fetchall()
-
-    for h in historico:
-        st.write(f"{h[3]} | Receita: {h[1]} | Lucro: {h[2]}")
+    st.success("Relatório gerado com sucesso.")
